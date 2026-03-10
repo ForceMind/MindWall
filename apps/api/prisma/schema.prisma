@@ -49,11 +49,13 @@ model UserProfile {
   user_id        String   @id @db.Uuid
   real_avatar    String?
   real_name      String?
+  city           String?  @db.VarChar(128)
   is_wall_broken Boolean  @default(false)
   updated_at     DateTime @updatedAt
   created_at     DateTime @default(now())
   user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@index([city])
   @@map("user_profiles")
 }
 
@@ -80,6 +82,9 @@ model Match {
   user_b_id       String           @db.Uuid
   status          MatchStatus      @default(pending)
   resonance_score Int              @default(0)
+  ai_match_reason String?          @db.Text
+  wall_break_consents Json?
+  wall_broken_at    DateTime?
   created_at      DateTime         @default(now())
   updated_at      DateTime         @updatedAt
   user_a          User             @relation("MatchUserA", fields: [user_a_id], references: [id], onDelete: Cascade)
