@@ -1,49 +1,77 @@
-# MindWall (心垣)
+# MindWall (XinYuan)
 
-MindWall is an AI-mediated social sandbox platform where early user interactions are intercepted and rewritten by an LLM safety layer before they reach the other side.
+MindWall is an AI-mediated social sandbox platform. During early interactions, messages are filtered and rewritten by an AI safety middleware before delivery.
 
-## Phase 1 Stack Choices
+## Current Stack
 
-- Frontend: Next.js (App Router, TypeScript, Tailwind CSS) at `apps/web`
-- Backend: NestJS (Node.js, TypeScript) at `apps/api`
-- ORM: Prisma (PostgreSQL) in `apps/api/prisma/schema.prisma`
-- Infra: PostgreSQL with `pgvector` + Redis via Docker Compose (`infra/docker-compose.yml`)
+- Frontend: Next.js (App Router) + TypeScript + Tailwind CSS (`apps/web`)
+- Backend: NestJS + TypeScript (`apps/api`)
+- Database: PostgreSQL + Prisma (with `pgvector`)
+- Infra: Docker Compose (PostgreSQL + Redis)
 
-## Local Setup
+## One-Click Local Start
 
-1. Start infra:
+Windows PowerShell:
 
-   ```bash
-   docker compose -f infra/docker-compose.yml up -d
-   ```
+```powershell
+.\scripts\start-local.ps1
+```
 
-2. Backend env is already set to:
+Double-click runner (Windows):
 
-   ```bash
-   DATABASE_URL="postgresql://mindwall:mindwall@localhost:5432/mindwall?schema=public"
-   ```
+```text
+scripts\start-local.cmd
+```
 
-3. Generate Prisma client:
+What it does:
 
-   ```bash
-   cd apps/api
-   npm run prisma:generate
-   ```
+1. Starts PostgreSQL + Redis with Docker Compose
+2. Installs API/Web dependencies (unless skipped)
+3. Runs Prisma generate + migration deploy
+4. Starts API and Web dev servers
 
-4. Apply migrations (after Docker is running):
+Default URLs:
 
-   ```bash
-   npm run prisma:migrate -- --name init_mindwall
-   ```
+- API: `http://localhost:3000`
+- Web: `http://localhost:3001`
 
-5. Start apps:
+Optional flags:
 
-   ```bash
-   # terminal 1
-   cd apps/api
-   npm run start:dev
+```powershell
+.\scripts\start-local.ps1 -SkipInstall -SkipMigrate -NoDocker
+```
 
-   # terminal 2
-   cd apps/web
-   npm run dev
-   ```
+## One-Click Server Deploy/Update
+
+Linux:
+
+```bash
+chmod +x scripts/deploy-update.sh
+./scripts/deploy-update.sh
+```
+
+Optional env:
+
+- `BRANCH` (default `main`)
+- `WEB_PORT` (default `3001`)
+
+Example:
+
+```bash
+BRANCH=main WEB_PORT=3101 ./scripts/deploy-update.sh
+```
+
+Windows Server:
+
+```powershell
+.\scripts\deploy-update.ps1 -Branch main -WebPort 3001
+```
+
+Deploy script flow:
+
+1. Pull latest code from the target branch
+2. Start/update PostgreSQL + Redis
+3. Install dependencies (`npm ci`)
+4. Run Prisma generate + migrate deploy
+5. Build API and Web
+6. If `pm2` exists, restart `mindwall-api` and `mindwall-web`
