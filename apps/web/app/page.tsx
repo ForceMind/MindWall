@@ -1,131 +1,154 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { AppLoadingScreen, AppShell } from "../components/app-shell";
+import { fetchCurrentViewer, logout, type Viewer } from "../lib/auth-client";
+import { apiBaseUrl } from "../lib/config";
+import { getAuthHeaders } from "../lib/session";
 
 type ChatMessage = {
   role: "assistant" | "user";
   text: string;
 };
 
-type PublicTag = {
-  tag_name: string;
-  weight: number;
-  ai_justification: string;
-};
-
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:3000";
-const userIdStorageKey = "mindwall_user_id";
-const cityStorageKey = "mindwall_city";
+function statusText(isCompleted: boolean, sessionId: string) {
+  if (isCompleted) {
+    return "已完成";
+  }
+  if (sessionId) {
+    return "进行中";
+  }
+  return "未开始";
+}
 
 export default function HomePage() {
-  const [nickname, setNickname] = useState("");
-  const [city, setCity] = useState("");
+  const [viewer, setViewer] = useState<Viewer | null>(null);
+  const [checking, setChecking] = useState(true);
   const [sessionId, setSessionId] = useState("");
-  const [userId, setUserId] = useState("");
+  const [city, setCity] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCompleted, setIsCompleted] = useState(false);
   const [summary, setSummary] = useState("");
-  const [publicTags, setPublicTags] = useState<PublicTag[]>([]);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const canSend = useMemo(() => {
-    return Boolean(sessionId) && input.trim().length > 0 && !isLoading && !isCompleted;
-  }, [sessionId, input, isLoading, isCompleted]);
+  useEffect(() => {
+    async function bootstrap() {
+      try {
+        const nextViewer = await fetchCurrentViewer();
+        if (!nextViewer) {
+          window.location.replace("/login");
+          return;
+        }
 
-  const matchLink = useMemo(() => {
-    const query = new URLSearchParams();
-    if (userId) {
-      query.set("user_id", userId);
+        setViewer(nextViewer);
+        setCity(nextViewer.profile?.city || "");
+        setIsCompleted(
+          nextViewer.user.status === "active" && nextViewer.public_tags.length > 0,
+        );
+      } catch (err) {
+        setError((err as Error).message || "加载账户信息失败。");
+      } finally {
+        setChecking(false);
+      }
     }
-    if (city.trim()) {
-      query.set("city", city.trim());
+
+    void bootstrap();
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } finally {
+      window.location.replace("/login");
     }
-    const suffix = query.toString();
-    return suffix ? `/matches?${suffix}` : "/matches";
-  }, [city, userId]);
+  }
 
   async function startInterview() {
-    setError("");
     setIsLoading(true);
+    setError("");
 
     try {
-      const response = await fetch(`${apiBaseUrl}/onboarding/sessions`, {
+      const response = await fetch(`${apiBaseUrl}/onboarding/me/session`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({
+          "Content-Type": "application/json",
+        }),
         body: JSON.stringify({
-          auth_provider_id: nickname.trim() || undefined,
           city: city.trim() || undefined,
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`启动访谈失败：${response.status}`);
+        const detail = await response.text();
+        throw new Error(`启动访谈失败：${response.status} ${detail}`);
       }
 
-      const data = await response.json();
-      const nextUserId = String(data.user_id || "");
+      const data = (await response.json()) as {
+        session_id: string;
+        assistant_message: string;
+      };
 
-      setSessionId(String(data.session_id || ""));
-      setUserId(nextUserId);
-      setMessages([{ role: "assistant", text: String(data.assistant_message || "") }]);
+      setSessionId(data.session_id);
+      setMessages([{ role: "assistant", text: data.assistant_message }]);
       setSummary("");
-      setPublicTags([]);
       setIsCompleted(false);
-
-      if (nextUserId) {
-        window.localStorage.setItem(userIdStorageKey, nextUserId);
-      }
-      if (city.trim()) {
-        window.localStorage.setItem(cityStorageKey, city.trim());
-      }
     } catch (err) {
-      setError((err as Error).message || "启动访谈失败");
+      setError((err as Error).message || "启动访谈失败。");
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function sendAnswer(event: FormEvent) {
+  async function sendAnswer(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSend) {
+    const content = input.trim();
+    if (!content || !sessionId) {
       return;
     }
 
-    const answer = input.trim();
     setInput("");
-    setError("");
     setIsLoading(true);
-    setMessages((prev) => [...prev, { role: "user", text: answer }]);
+    setError("");
+    setMessages((prev) => [...prev, { role: "user", text: content }]);
 
     try {
       const response = await fetch(
-        `${apiBaseUrl}/onboarding/sessions/${sessionId}/messages`,
+        `${apiBaseUrl}/onboarding/me/session/${sessionId}/messages`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: answer }),
+          headers: getAuthHeaders({
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify({
+            message: content,
+          }),
         },
       );
 
       if (!response.ok) {
-        throw new Error(`发送失败：${response.status}`);
+        const detail = await response.text();
+        throw new Error(`发送失败：${response.status} ${detail}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as {
+        status: string;
+        assistant_message?: string;
+        onboarding_summary?: string;
+      };
 
       if (data.status === "completed") {
+        const nextViewer = await fetchCurrentViewer();
+        setViewer(nextViewer);
         setIsCompleted(true);
-        setSummary(String(data.onboarding_summary || ""));
-        setPublicTags(Array.isArray(data.public_tags) ? data.public_tags : []);
+        setSummary(data.onboarding_summary || "");
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            text: "访谈完成。已生成你的公开标签，可以进入匹配。",
+            text: "访谈完成。你的公开标签已经生成，可以进入匹配。",
           },
         ]);
         return;
@@ -133,167 +156,175 @@ export default function HomePage() {
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: String(data.assistant_message || "请继续回答。") },
+        {
+          role: "assistant",
+          text: data.assistant_message || "请继续回答。",
+        },
       ]);
     } catch (err) {
-      setError((err as Error).message || "发送失败");
+      setError((err as Error).message || "发送失败。");
     } finally {
       setIsLoading(false);
     }
   }
 
+  if (checking) {
+    return <AppLoadingScreen label="正在载入你的访谈空间..." />;
+  }
+
+  if (!viewer) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-10 font-sans">
-      <main className="mx-auto w-full max-w-6xl space-y-6">
-        <header className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+    <AppShell
+      title="灵魂访谈"
+      subtitle="先回答 4 个问题，系统会生成你的公开标签和匹配画像。"
+      actions={
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="inline-flex h-10 items-center rounded-2xl border border-black/8 bg-white/80 px-4 text-sm text-zinc-700"
+        >
+          退出
+        </button>
+      }
+      status={
+        <>
+          <span className="mw-chip">{viewer.profile?.real_name || viewer.user.email}</span>
+          <span className="mw-chip">城市 {city || "未填写"}</span>
+          <span className="mw-chip">状态 {statusText(isCompleted, sessionId)}</span>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <section className="mw-card-dark p-5">
+          <p className="text-xs uppercase tracking-[0.28em] text-zinc-400">Step 1</p>
+          <h2 className="mt-2 text-xl font-semibold">开始访谈</h2>
+          <p className="mt-2 text-sm leading-7 text-zinc-300">
+            先填写你想匹配的城市，再启动访谈。每次发送一段完整回答即可。
+          </p>
+
+          <div className="mt-4 space-y-3">
+            <input
+              className="h-12 w-full rounded-2xl border border-white/10 bg-white/6 px-4 text-sm outline-none placeholder:text-zinc-500 focus:border-[#9fe870]"
+              placeholder="城市，例如 上海"
+              value={city}
+              onChange={(event) => setCity(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={startInterview}
+              disabled={isLoading}
+              className="h-12 w-full rounded-2xl bg-[#9fe870] px-5 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:bg-[#d8efc9]"
+            >
+              {isLoading ? "处理中..." : sessionId ? "重新开始访谈" : "开始访谈"}
+            </button>
+          </div>
+        </section>
+
+        <section className="mw-card p-4">
+          <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-[0.25em] text-zinc-500">
-                MINDWALL | 心垣
-              </p>
-              <h1 className="mt-2 text-2xl font-semibold text-zinc-900 md:text-3xl">
-                新用户入口
-              </h1>
-              <p className="mt-2 text-sm leading-7 text-zinc-600">
-                第一步先完成 4 轮 AI 访谈，系统会生成你的公开标签，再进入盲盒匹配。
+              <p className="text-sm font-semibold text-zinc-900">访谈对话</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {messages.length === 0 ? "开始后会在这里连续提问" : "对话会自动保存在当前会话中"}
               </p>
             </div>
-            <Link
-              href="/admin"
-              className="inline-flex h-10 items-center rounded-xl border border-zinc-300 px-4 text-sm text-zinc-700"
+            <span className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-medium text-white">
+              {statusText(isCompleted, sessionId)}
+            </span>
+          </div>
+
+          <div className="mt-4 max-h-[34svh] min-h-[220px] space-y-3 overflow-y-auto rounded-[22px] bg-zinc-50 p-3">
+            {messages.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-4 text-sm leading-7 text-zinc-500">
+                点击“开始访谈”后，系统会先问你第一个问题。
+              </div>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={`rounded-2xl px-4 py-3 text-sm leading-7 ${
+                    message.role === "assistant"
+                      ? "mr-10 bg-white text-zinc-800 shadow-sm"
+                      : "ml-10 bg-zinc-950 text-white"
+                  }`}
+                >
+                  <p className="mb-1 text-xs opacity-60">
+                    {message.role === "assistant" ? "访谈助手" : "我"}
+                  </p>
+                  <p>{message.text}</p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <form className="mt-4 space-y-3" onSubmit={sendAnswer}>
+            <textarea
+              className="min-h-28 w-full rounded-[22px] border border-zinc-200 bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-zinc-950"
+              placeholder="输入你的回答..."
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              disabled={!sessionId || isCompleted}
+            />
+            <button
+              type="submit"
+              disabled={!sessionId || !input.trim() || isLoading || isCompleted}
+              className="h-11 w-full rounded-2xl bg-zinc-950 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
             >
-              管理后台
+              发送回答
+            </button>
+          </form>
+        </section>
+
+        <section className="mw-card p-4">
+          <p className="text-sm font-semibold text-zinc-900">公开标签</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {viewer.public_tags.length === 0 ? (
+              <span className="rounded-full bg-zinc-100 px-3 py-2 text-xs text-zinc-500">
+                完成访谈后生成
+              </span>
+            ) : (
+              viewer.public_tags.map((tag) => (
+                <span
+                  key={tag.tag_name}
+                  className="rounded-full bg-zinc-950 px-3 py-2 text-xs font-medium text-white"
+                >
+                  {tag.tag_name}
+                </span>
+              ))
+            )}
+          </div>
+          <p className="mt-4 text-sm leading-7 text-zinc-600">
+            {summary || "完成访谈后，你就可以进入盲盒匹配。"}
+          </p>
+        </section>
+
+        <section className="mw-card p-4">
+          <p className="text-sm font-semibold text-zinc-900">下一步</p>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Link
+              href="/matches"
+              className="flex h-12 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-medium text-white"
+            >
+              去匹配
+            </Link>
+            <Link
+              href="/companion"
+              className="flex h-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-sm font-medium text-zinc-700"
+            >
+              AI 陪练
             </Link>
           </div>
-        </header>
-
-        <section className="grid gap-6 md:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-            <h2 className="text-sm font-semibold text-zinc-900">开始访谈</h2>
-            <div className="mt-4 grid gap-3 rounded-2xl bg-zinc-100 p-4 md:grid-cols-[1fr_1fr_auto]">
-              <input
-                className="h-11 rounded-xl border border-zinc-300 bg-white px-4 text-sm outline-none focus:border-zinc-500"
-                placeholder="昵称（可选）"
-                value={nickname}
-                onChange={(event) => setNickname(event.target.value)}
-                disabled={Boolean(sessionId)}
-              />
-              <input
-                className="h-11 rounded-xl border border-zinc-300 bg-white px-4 text-sm outline-none focus:border-zinc-500"
-                placeholder="城市（用于同城匹配）"
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-                disabled={Boolean(sessionId)}
-              />
-              <button
-                type="button"
-                onClick={startInterview}
-                disabled={isLoading || Boolean(sessionId)}
-                className="h-11 rounded-xl bg-zinc-900 px-5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-              >
-                {sessionId ? "访谈已开始" : "开始访谈"}
-              </button>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <h3 className="text-sm font-semibold text-zinc-800">对话区</h3>
-              <div className="mt-3 max-h-[360px] space-y-3 overflow-y-auto pr-1">
-                {messages.length === 0 ? (
-                  <p className="text-sm text-zinc-500">
-                    点击“开始访谈”后，AI 会先提出第一个问题。
-                  </p>
-                ) : (
-                  messages.map((message, index) => (
-                    <div
-                      key={`${message.role}-${index}`}
-                      className={`rounded-xl px-4 py-3 text-sm leading-7 ${
-                        message.role === "assistant"
-                          ? "bg-white text-zinc-800"
-                          : "ml-8 bg-zinc-900 text-zinc-100"
-                      }`}
-                    >
-                      <p className="mb-1 text-xs opacity-60">
-                        {message.role === "assistant" ? "AI" : "我"}
-                      </p>
-                      <p>{message.text}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <form onSubmit={sendAnswer} className="mt-4 space-y-2">
-              <textarea
-                className="min-h-24 w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-zinc-500 disabled:bg-zinc-100"
-                placeholder="输入你的回答..."
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={!sessionId || isCompleted}
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-zinc-500">
-                  {isCompleted ? "访谈已完成" : "每次发送一个完整回答"}
-                </p>
-                <button
-                  type="submit"
-                  disabled={!canSend}
-                  className="h-10 rounded-xl bg-zinc-900 px-5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-                >
-                  {isLoading ? "处理中..." : "发送"}
-                </button>
-              </div>
-              {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            </form>
-          </div>
-
-          <aside className="space-y-4">
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-zinc-900">我的状态</h3>
-              <div className="mt-3 space-y-1 text-sm text-zinc-700">
-                <p>用户 ID：{userId || "未生成"}</p>
-                <p>城市：{city || "未填写"}</p>
-                <p>阶段：{isCompleted ? "访谈完成" : sessionId ? "访谈中" : "未开始"}</p>
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-zinc-900">公开标签</h3>
-              <div className="mt-3 space-y-3">
-                {publicTags.length === 0 ? (
-                  <p className="text-sm text-zinc-500">完成访谈后显示。</p>
-                ) : (
-                  publicTags.map((tag) => (
-                    <div key={tag.tag_name} className="rounded-xl bg-zinc-100 p-3">
-                      <p className="text-sm font-semibold text-zinc-900">
-                        {tag.tag_name}
-                        <span className="ml-2 text-xs font-normal text-zinc-600">
-                          权重 {tag.weight.toFixed(2)}
-                        </span>
-                      </p>
-                      <p className="mt-1 text-xs leading-6 text-zinc-600">
-                        {tag.ai_justification}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-zinc-900">访谈总结</h3>
-              <p className="mt-2 text-sm leading-7 text-zinc-600">
-                {summary || "完成访谈后显示一段总结。"}
-              </p>
-              <Link
-                href={matchLink}
-                className="mt-4 inline-flex h-10 items-center rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white"
-              >
-                进入盲盒匹配
-              </Link>
-            </section>
-          </aside>
         </section>
-      </main>
-    </div>
+
+        {error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        ) : null}
+      </div>
+    </AppShell>
   );
 }

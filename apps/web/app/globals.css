@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f1e9;
+  --foreground: #111827;
+  --mw-frame: rgba(253, 251, 247, 0.88);
+  --mw-stroke: rgba(32, 37, 31, 0.08);
+  --mw-card: rgba(255, 255, 255, 0.88);
+  --mw-card-dark: #15211c;
+  --mw-accent: #9fe870;
+  --mw-accent-strong: #1e2c25;
 }
 
 @theme inline {
@@ -12,15 +18,175 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  background:
+    radial-gradient(circle at top, rgba(97, 140, 114, 0.12), transparent 32%),
+    linear-gradient(180deg, #f6f0e6 0%, #f2f4f6 50%, #dce8df 100%);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mw-app-bg {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(159, 232, 112, 0.16), transparent 22%),
+    radial-gradient(circle at 85% 5%, rgba(15, 23, 42, 0.1), transparent 25%),
+    linear-gradient(180deg, #ebe4d8 0%, #eef2f3 52%, #d8e5da 100%);
+}
+
+.mw-device {
+  width: 100%;
+  max-width: 440px;
+  min-height: calc(100svh - 24px);
+  max-height: calc(100svh - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 34px;
+  border: 1px solid var(--mw-stroke);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(245, 244, 239, 0.86) 100%);
+  box-shadow:
+    0 24px 80px rgba(16, 24, 40, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(18px);
+}
+
+.mw-header {
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(251, 248, 242, 0.78) 100%);
+}
+
+.mw-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mw-header-kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.mw-header-title {
+  margin: 6px 0 0;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #101828;
+}
+
+.mw-header-subtitle {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #475467;
+}
+
+.mw-header-status {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mw-content {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+
+.mw-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mw-content::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.14);
+}
+
+.mw-tabbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.mw-card {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 26px;
+  background: var(--mw-card);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.mw-card-dark {
+  border-radius: 26px;
+  background: linear-gradient(180deg, #18251f 0%, #111827 100%);
+  color: #f8fafc;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+}
+
+.mw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  color: #344054;
+}
+
+.mw-centered {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: #344054;
+}
+
+@media (min-width: 768px) {
+  .mw-app-bg {
+    padding: 20px;
+  }
+
+  .mw-device {
+    min-height: min(920px, calc(100svh - 40px));
+    max-height: min(920px, calc(100svh - 40px));
+  }
 }

@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-
-type PublicTag = {
-  tag_name: string;
-  weight: number;
-  ai_justification: string;
-};
+import { useEffect, useState } from "react";
+import { AppLoadingScreen, AppShell } from "../../components/app-shell";
+import { fetchCurrentViewer, logout, type Viewer } from "../../lib/auth-client";
+import { apiBaseUrl } from "../../lib/config";
+import { getAuthHeaders } from "../../lib/session";
 
 type MatchItem = {
   match_id: string;
@@ -15,9 +13,12 @@ type MatchItem = {
   resonance_score: number;
   ai_match_reason: string;
   counterpart: {
-    user_id: string;
     city: string | null;
-    public_tags: PublicTag[];
+    public_tags: Array<{
+      tag_name: string;
+      weight: number;
+      ai_justification: string;
+    }>;
   };
 };
 
@@ -28,50 +29,69 @@ type RunSummary = {
   created_matches: number;
 };
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:3000";
-const userIdStorageKey = "mindwall_user_id";
-const cityStorageKey = "mindwall_city";
-
 export default function MatchesPage() {
-  const [userId, setUserId] = useState("");
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [city, setCity] = useState("");
   const [matches, setMatches] = useState<MatchItem[]>([]);
   const [summary, setSummary] = useState<RunSummary | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isLoadingMatches, setIsLoadingMatches] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [loadingMatches, setLoadingMatches] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const search = new URLSearchParams(window.location.search);
-    const userFromQuery = search.get("user_id")?.trim() || "";
-    const cityFromQuery = search.get("city")?.trim() || "";
-    const userFromStorage = window.localStorage.getItem(userIdStorageKey) || "";
-    const cityFromStorage = window.localStorage.getItem(cityStorageKey) || "";
+    async function bootstrap() {
+      try {
+        const nextViewer = await fetchCurrentViewer();
+        if (!nextViewer) {
+          window.location.replace("/login");
+          return;
+        }
 
-    const nextUserId = userFromQuery || userFromStorage;
-    const nextCity = cityFromQuery || cityFromStorage;
+        setViewer(nextViewer);
+        setCity(nextViewer.profile?.city || "");
+        await loadMatchesInternal();
+      } catch (err) {
+        setError((err as Error).message || "加载匹配页失败。");
+      } finally {
+        setChecking(false);
+      }
+    }
 
-    if (nextUserId) {
-      setUserId(nextUserId);
-      window.localStorage.setItem(userIdStorageKey, nextUserId);
-    }
-    if (nextCity) {
-      setCity(nextCity);
-      window.localStorage.setItem(cityStorageKey, nextCity);
-    }
+    void bootstrap();
   }, []);
 
-  const canRun = useMemo(() => !isRunning, [isRunning]);
+  async function loadMatchesInternal() {
+    setLoadingMatches(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/match-engine/me/matches`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`读取匹配失败：${response.status} ${detail}`);
+      }
+
+      const data = (await response.json()) as { matches?: MatchItem[] };
+      setMatches(Array.isArray(data.matches) ? data.matches : []);
+    } catch (err) {
+      setError((err as Error).message || "读取匹配失败。");
+    } finally {
+      setLoadingMatches(false);
+    }
+  }
 
   async function runMatchEngine() {
+    setRunning(true);
     setError("");
-    setIsRunning(true);
 
     try {
       const response = await fetch(`${apiBaseUrl}/match-engine/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           city: city.trim() || undefined,
           max_matches_per_user: 3,
@@ -81,183 +101,184 @@ export default function MatchesPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`运行匹配失败：${response.status}`);
+        const detail = await response.text();
+        throw new Error(`运行匹配失败：${response.status} ${detail}`);
       }
 
-      const data = await response.json();
-      setSummary({
-        city_scope: String(data.city_scope || "ALL"),
-        considered_users: Number(data.considered_users || 0),
-        candidate_pairs: Number(data.candidate_pairs || 0),
-        created_matches: Number(data.created_matches || 0),
-      });
-
-      if (userId.trim()) {
-        await loadMatches(userId.trim());
-      }
-
-      if (city.trim()) {
-        window.localStorage.setItem(cityStorageKey, city.trim());
-      }
+      const data = (await response.json()) as RunSummary;
+      setSummary(data);
+      await loadMatchesInternal();
     } catch (err) {
-      setError((err as Error).message || "运行匹配失败");
+      setError((err as Error).message || "运行匹配失败。");
     } finally {
-      setIsRunning(false);
+      setRunning(false);
     }
   }
 
-  async function loadMatches(targetUserId?: string) {
-    const normalizedUserId = (targetUserId || userId).trim();
-    if (!normalizedUserId) {
-      setError("请先填写用户 ID。");
-      return;
-    }
-
-    setError("");
-    setIsLoadingMatches(true);
+  async function handleLogout() {
     try {
-      const response = await fetch(
-        `${apiBaseUrl}/match-engine/users/${normalizedUserId}/matches`,
-      );
-      if (!response.ok) {
-        throw new Error(`获取匹配列表失败：${response.status}`);
-      }
-
-      const data = await response.json();
-      setMatches(Array.isArray(data.matches) ? data.matches : []);
-      window.localStorage.setItem(userIdStorageKey, normalizedUserId);
-    } catch (err) {
-      setError((err as Error).message || "获取匹配列表失败");
+      await logout();
     } finally {
-      setIsLoadingMatches(false);
+      window.location.replace("/login");
     }
+  }
+
+  if (checking) {
+    return <AppLoadingScreen label="正在整理你的盲盒匹配..." />;
+  }
+
+  if (!viewer) {
+    return null;
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-10 font-sans">
-      <main className="mx-auto w-full max-w-6xl space-y-6">
-        <header className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-          <p className="text-xs font-semibold tracking-[0.25em] text-zinc-500">
-            MINDWALL | 盲盒匹配
+    <AppShell
+      title="盲盒匹配"
+      subtitle="只显示公开标签和匹配理由，不显示真实头像与身份。"
+      actions={
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="inline-flex h-10 items-center rounded-2xl border border-black/8 bg-white/80 px-4 text-sm text-zinc-700"
+        >
+          退出
+        </button>
+      }
+      status={
+        <>
+          <span className="mw-chip">{viewer.profile?.real_name || viewer.user.email}</span>
+          <span className="mw-chip">城市 {city || "未填写"}</span>
+          <span className="mw-chip">结果 {matches.length} 个</span>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <section className="mw-card-dark p-5">
+          <p className="text-xs uppercase tracking-[0.28em] text-zinc-400">Step 2</p>
+          <h2 className="mt-2 text-xl font-semibold">运行匹配</h2>
+          <p className="mt-2 text-sm leading-7 text-zinc-300">
+            先选择匹配城市，再刷新结果列表。结果卡片是匿名盲盒，不显示真实资料。
           </p>
-          <h1 className="mt-2 text-2xl font-semibold text-zinc-900 md:text-3xl">
-            今日匹配
-          </h1>
-          <p className="mt-2 text-sm leading-7 text-zinc-600">
-            先运行匹配，再查看你的候选对象。页面只展示公开标签和匹配理由，不展示真实身份信息。
-          </p>
-          <div className="mt-4 flex gap-2">
-            <Link
-              href="/"
-              className="inline-flex h-10 items-center rounded-xl border border-zinc-300 px-4 text-sm text-zinc-700"
-            >
-              返回首页
-            </Link>
-            <Link
-              href="/sandbox"
-              className="inline-flex h-10 items-center rounded-xl border border-zinc-300 px-4 text-sm text-zinc-700"
-            >
-              打开聊天页
-            </Link>
-          </div>
-        </header>
-
-        <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-zinc-900">操作区</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
+          <div className="mt-4 space-y-3">
             <input
-              className="h-11 rounded-xl border border-zinc-300 px-4 text-sm outline-none focus:border-zinc-500"
-              placeholder="我的用户 ID"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-            />
-            <input
-              className="h-11 rounded-xl border border-zinc-300 px-4 text-sm outline-none focus:border-zinc-500"
-              placeholder="城市（可选）"
+              className="h-12 w-full rounded-2xl border border-white/10 bg-white/6 px-4 text-sm outline-none placeholder:text-zinc-500 focus:border-[#9fe870]"
+              placeholder="城市，例如 上海"
               value={city}
               onChange={(event) => setCity(event.target.value)}
             />
-            <button
-              type="button"
-              className="h-11 rounded-xl bg-zinc-900 px-5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-400"
-              onClick={runMatchEngine}
-              disabled={!canRun}
-            >
-              {isRunning ? "匹配中..." : "运行匹配"}
-            </button>
-            <button
-              type="button"
-              className="h-11 rounded-xl border border-zinc-300 px-5 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => loadMatches()}
-              disabled={isLoadingMatches}
-            >
-              {isLoadingMatches ? "读取中..." : "刷新列表"}
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={runMatchEngine}
+                disabled={running}
+                className="h-12 rounded-2xl bg-[#9fe870] text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:bg-[#d8efc9]"
+              >
+                {running ? "匹配中..." : "运行匹配"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void loadMatchesInternal()}
+                disabled={loadingMatches}
+                className="h-12 rounded-2xl border border-white/10 bg-white/6 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingMatches ? "刷新中..." : "刷新结果"}
+              </button>
+            </div>
           </div>
-
-          {summary ? (
-            <div className="mt-4 rounded-2xl bg-zinc-100 p-4 text-sm text-zinc-700">
-              <p>城市范围：{summary.city_scope}</p>
-              <p>参与用户：{summary.considered_users}</p>
-              <p>候选配对：{summary.candidate_pairs}</p>
-              <p>生成匹配：{summary.created_matches}</p>
-            </div>
-          ) : null}
-
-          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
         </section>
 
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold text-zinc-700">匹配结果</h2>
-          {matches.length === 0 ? (
-            <div className="rounded-3xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500 shadow-sm">
-              暂无匹配。先点击“运行匹配”，再点击“刷新列表”。
+        {summary ? (
+          <section className="mw-card p-4">
+            <p className="text-sm font-semibold text-zinc-900">本轮匹配摘要</p>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-zinc-700">
+              <div className="rounded-2xl bg-zinc-50 p-3">
+                <p className="text-xs text-zinc-500">城市范围</p>
+                <p className="mt-1 font-medium">{summary.city_scope}</p>
+              </div>
+              <div className="rounded-2xl bg-zinc-50 p-3">
+                <p className="text-xs text-zinc-500">参与用户</p>
+                <p className="mt-1 font-medium">{summary.considered_users}</p>
+              </div>
+              <div className="rounded-2xl bg-zinc-50 p-3">
+                <p className="text-xs text-zinc-500">候选配对</p>
+                <p className="mt-1 font-medium">{summary.candidate_pairs}</p>
+              </div>
+              <div className="rounded-2xl bg-zinc-50 p-3">
+                <p className="text-xs text-zinc-500">生成匹配</p>
+                <p className="mt-1 font-medium">{summary.created_matches}</p>
+              </div>
             </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {matches.map((item) => (
-                <article
-                  key={item.match_id}
-                  className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm"
-                >
-                  <div className="flex items-center justify-between">
+          </section>
+        ) : null}
+
+        {matches.length === 0 ? (
+          <section className="mw-card p-5">
+            <p className="text-base font-semibold text-zinc-900">还没有真实匹配</p>
+            <p className="mt-2 text-sm leading-7 text-zinc-600">
+              你可以先重新运行匹配，或者进入明确标识的 AI 陪练模式练习表达。
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Link
+                href="/companion"
+                className="flex h-12 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-medium text-white"
+              >
+                AI 陪练
+              </Link>
+              <Link
+                href="/"
+                className="flex h-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-sm font-medium text-zinc-700"
+              >
+                回到访谈
+              </Link>
+            </div>
+          </section>
+        ) : (
+          <section className="space-y-3">
+            {matches.map((item) => (
+              <article key={item.match_id} className="mw-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
                     <p className="text-sm font-semibold text-zinc-900">
-                      共振分：{item.resonance_score}
+                      共振分 {item.resonance_score}
                     </p>
-                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-600">
-                      {item.status}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      城市 {item.counterpart.city || "未填写"}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-zinc-950 px-3 py-1 text-xs font-medium text-white">
+                    {item.status}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm leading-7 text-zinc-700">
+                  {item.ai_match_reason}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.counterpart.public_tags.map((tag) => (
+                    <span
+                      key={`${item.match_id}-${tag.tag_name}`}
+                      className="rounded-full bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700"
+                    >
+                      {tag.tag_name}
                     </span>
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-500">
-                    对方城市：{item.counterpart.city || "未填写"}
-                  </p>
-                  <p className="mt-3 text-sm leading-7 text-zinc-700">
-                    {item.ai_match_reason}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {item.counterpart.public_tags.slice(0, 6).map((tag) => (
-                      <span
-                        key={`${item.match_id}-${tag.tag_name}`}
-                        className="rounded-full bg-zinc-900 px-3 py-1 text-xs text-zinc-100"
-                      >
-                        {tag.tag_name}
-                      </span>
-                    ))}
-                  </div>
-                  <Link
-                    href={`/sandbox?user_id=${encodeURIComponent(
-                      userId.trim(),
-                    )}&match_id=${encodeURIComponent(item.match_id)}`}
-                    className="mt-4 inline-flex h-10 items-center rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white"
-                  >
-                    进入沙盒聊天
-                  </Link>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
+                  ))}
+                </div>
+                <Link
+                  href={`/sandbox?match_id=${encodeURIComponent(item.match_id)}`}
+                  className="mt-4 flex h-11 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-medium text-white"
+                >
+                  进入沙盒聊天
+                </Link>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        ) : null}
+      </div>
+    </AppShell>
   );
 }

@@ -515,7 +515,7 @@ export class MatchEngineService {
     ].join('\n');
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

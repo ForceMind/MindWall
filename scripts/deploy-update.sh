@@ -15,9 +15,36 @@ require_command() {
   fi
 }
 
+ensure_docker_engine() {
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker engine is not running. Start Docker first, then rerun scripts/deploy-update.sh."
+    exit 1
+  fi
+}
+
+wait_for_container_health() {
+  local container_name="$1"
+  local timeout_seconds="${2:-120}"
+  local waited=0
+
+  while [ "$waited" -lt "$timeout_seconds" ]; do
+    local status
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_name" 2>/dev/null || true)"
+    if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+
+  echo "Container '$container_name' did not become ready within ${timeout_seconds}s."
+  exit 1
+}
+
 require_command git
 require_command docker
 require_command npm
+ensure_docker_engine
 
 echo "[1/7] Updating code on branch: $BRANCH"
 cd "$ROOT_DIR"
@@ -27,6 +54,7 @@ git pull --ff-only origin "$BRANCH"
 
 echo "[2/7] Starting/updating infrastructure containers"
 docker compose -f "$COMPOSE_FILE" up -d
+wait_for_container_health "mindwall-postgres"
 
 echo "[3/7] Installing API dependencies"
 cd "$API_DIR"

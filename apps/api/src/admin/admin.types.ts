@@ -1,4 +1,5 @@
 export interface RuntimeConfig {
+  openai_base_url?: string;
   openai_api_key?: string;
   openai_model?: string;
   openai_embedding_model?: string;
@@ -7,6 +8,7 @@ export interface RuntimeConfig {
 }
 
 export interface AiRuntimeConfig {
+  openaiBaseUrl: string;
   openaiApiKey: string;
   openaiModel: string;
   openaiEmbeddingModel: string;

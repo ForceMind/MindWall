@@ -8,11 +8,15 @@ export class AdminConfigService {
   private readonly logger = new Logger(AdminConfigService.name);
   private readonly configDir = path.join(process.cwd(), 'config');
   private readonly configFile = path.join(this.configDir, 'runtime-config.json');
+  private readonly defaultOpenAiBaseUrl = 'https://api.openai.com/v1';
 
   async getAiConfig(): Promise<AiRuntimeConfig> {
     const runtime = await this.readRuntimeConfig();
 
     return {
+      openaiBaseUrl: this.normalizeBaseUrl(
+        runtime.openai_base_url || process.env.OPENAI_BASE_URL || this.defaultOpenAiBaseUrl,
+      ),
       openaiApiKey: runtime.openai_api_key || process.env.OPENAI_API_KEY || '',
       openaiModel: runtime.openai_model || process.env.OPENAI_MODEL || 'gpt-4.1-mini',
       openaiEmbeddingModel:
@@ -29,6 +33,7 @@ export class AdminConfigService {
     const key = ai.openaiApiKey;
 
     return {
+      openai_base_url: ai.openaiBaseUrl,
       openai_api_key_configured: Boolean(key),
       openai_api_key_preview: key
         ? `${key.slice(0, 3)}***${key.slice(Math.max(3, key.length - 4))}`
@@ -37,12 +42,31 @@ export class AdminConfigService {
       openai_embedding_model: ai.openaiEmbeddingModel,
       web_origin: ai.webOrigin,
       source: {
-        openai_api_key: runtime.openai_api_key ? 'runtime-config' : 'env',
-        openai_model: runtime.openai_model ? 'runtime-config' : 'env',
+        openai_base_url: runtime.openai_base_url
+          ? 'runtime-config'
+          : process.env.OPENAI_BASE_URL
+            ? 'env'
+            : 'default',
+        openai_api_key: runtime.openai_api_key
+          ? 'runtime-config'
+          : process.env.OPENAI_API_KEY
+            ? 'env'
+            : 'unset',
+        openai_model: runtime.openai_model
+          ? 'runtime-config'
+          : process.env.OPENAI_MODEL
+            ? 'env'
+            : 'default',
         openai_embedding_model: runtime.openai_embedding_model
           ? 'runtime-config'
-          : 'env',
-        web_origin: runtime.web_origin ? 'runtime-config' : 'env',
+          : process.env.OPENAI_EMBEDDING_MODEL
+            ? 'env'
+            : 'default',
+        web_origin: runtime.web_origin
+          ? 'runtime-config'
+          : process.env.WEB_ORIGIN
+            ? 'env'
+            : 'default',
       },
       updated_at: runtime.updated_at || null,
       config_file: this.configFile,
@@ -57,6 +81,9 @@ export class AdminConfigService {
       updated_at: new Date().toISOString(),
     };
 
+    if (typeof input.openai_base_url === 'string') {
+      next.openai_base_url = this.normalizeBaseUrl(input.openai_base_url.trim());
+    }
     if (typeof input.openai_api_key === 'string') {
       next.openai_api_key = input.openai_api_key.trim();
     }
@@ -108,5 +135,13 @@ export class AdminConfigService {
   private async writeRuntimeConfig(config: RuntimeConfig) {
     await this.ensureConfigFile();
     await fs.writeFile(this.configFile, JSON.stringify(config, null, 2), 'utf8');
+  }
+
+  private normalizeBaseUrl(baseUrl: string) {
+    const normalized = baseUrl.trim();
+    if (!normalized) {
+      return this.defaultOpenAiBaseUrl;
+    }
+    return normalized.replace(/\/+$/, '');
   }
 }

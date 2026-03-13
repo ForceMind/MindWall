@@ -1,4 +1,7 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { SessionAuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { SessionUser } from '../auth/auth.types';
 import { OnboardingService } from './onboarding.service';
 
 interface StartSessionBody {
@@ -19,11 +22,30 @@ export class OnboardingController {
     return this.onboardingService.startSession(body);
   }
 
+  @Post('me/session')
+  @UseGuards(SessionAuthGuard)
+  async startMySession(
+    @CurrentUser() user: SessionUser,
+    @Body() body: Omit<StartSessionBody, 'auth_provider_id'>,
+  ) {
+    return this.onboardingService.startSessionForUser(user.userId, body);
+  }
+
   @Post('sessions/:sessionId/messages')
   async sendMessage(
     @Param('sessionId') sessionId: string,
     @Body() body: SendMessageBody,
   ) {
     return this.onboardingService.submitMessage(sessionId, body);
+  }
+
+  @Post('me/session/:sessionId/messages')
+  @UseGuards(SessionAuthGuard)
+  async sendMyMessage(
+    @CurrentUser() user: SessionUser,
+    @Param('sessionId') sessionId: string,
+    @Body() body: SendMessageBody,
+  ) {
+    return this.onboardingService.submitMessageForUser(sessionId, body, user.userId);
   }
 }

@@ -23,6 +23,9 @@ export class AdminController {
   async updateConfig(@Body() body: Record<string, unknown>) {
     const payload: RuntimeConfig = {};
 
+    if (typeof body.openai_base_url === 'string') {
+      payload.openai_base_url = body.openai_base_url;
+    }
     if (typeof body.openai_api_key === 'string') {
       payload.openai_api_key = body.openai_api_key;
     }

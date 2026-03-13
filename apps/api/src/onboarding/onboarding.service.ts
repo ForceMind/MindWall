@@ -81,10 +81,58 @@ export class OnboardingService {
       select: { id: true },
     });
 
+    return this.initializeSession(user.id, city);
+  }
+
+  async startSessionForUser(
+    userId: string,
+    body: Omit<StartSessionBody, 'auth_provider_id'>,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: 'onboarding',
+      },
+    });
+
+    return this.initializeSession(userId, body.city?.trim() || null);
+  }
+
+  async submitMessageForUser(
+    sessionId: string,
+    body: SendMessageBody,
+    userId: string,
+  ) {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.userId !== userId) {
+      throw new NotFoundException('Onboarding session not found.');
+    }
+
+    return this.submitMessageInternal(sessionId, session, body);
+  }
+
+  async submitMessage(sessionId: string, body: SendMessageBody) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new NotFoundException('Onboarding session not found.');
+    }
+
+    return this.submitMessageInternal(sessionId, session, body);
+  }
+
+  private async initializeSession(userId: string, city: string | null) {
     await this.prisma.userProfile.upsert({
-      where: { user_id: user.id },
+      where: { user_id: userId },
       create: {
-        user_id: user.id,
+        user_id: userId,
         city: city || undefined,
       },
       update: {
@@ -97,7 +145,7 @@ export class OnboardingService {
 
     this.sessions.set(sessionId, {
       sessionId,
-      userId: user.id,
+      userId,
       turns: [
         {
           role: 'assistant',
@@ -112,19 +160,18 @@ export class OnboardingService {
     return {
       status: 'in_progress',
       session_id: sessionId,
-      user_id: user.id,
+      user_id: userId,
       city,
       assistant_message: firstQuestion,
       remaining_questions: this.totalQuestions,
     };
   }
 
-  async submitMessage(sessionId: string, body: SendMessageBody) {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new NotFoundException('Onboarding session not found.');
-    }
-
+  private async submitMessageInternal(
+    sessionId: string,
+    session: OnboardingSession,
+    body: SendMessageBody,
+  ) {
     const message = body.message?.trim();
     if (!message) {
       throw new BadRequestException('message is required.');
@@ -492,7 +539,7 @@ export class OnboardingService {
     const model = aiConfig.openaiEmbeddingModel;
 
     try {
-      const response = await fetch('https://api.openai.com/v1/embeddings', {
+      const response = await fetch(`${aiConfig.openaiBaseUrl}/embeddings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -565,7 +612,7 @@ export class OnboardingService {
     const model = aiConfig.openaiModel;
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

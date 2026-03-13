@@ -1,4 +1,4 @@
-﻿-- Enable pgvector for embedding storage and similarity search.
+-- Enable pgvector for embedding storage and similarity search.
 CREATE EXTENSION IF NOT EXISTS vector;
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";

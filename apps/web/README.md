@@ -1,64 +1,54 @@
-# MindWall Web（前端）
+# MindWall Web锛堝墠绔級
 
-本目录是 MindWall 的前端应用，基于 Next.js（App Router）构建。  
-主要包含用户流程页面（访谈、匹配、沙盒聊天）和后台管理页面（配置 AI 接口）。
+鏈洰褰曟槸 MindWall 鐨勫墠绔簲鐢紝鍩轰簬 Next.js锛圓pp Router锛夋瀯寤恒€? 
+涓昏鍖呭惈鐢ㄦ埛娴佺▼椤甸潰锛堣璋堛€佸尮閰嶃€佹矙鐩掕亰澶╋級鍜屽悗鍙扮鐞嗛〉闈紙閰嶇疆 AI 鎺ュ彛锛夈€?
+## 鍚姩鏂瑰紡
 
-## 启动方式
-
-安装依赖：
-
+瀹夎渚濊禆锛?
 ```bash
 npm install
 ```
 
-开发模式（默认 3000 端口）：
+寮€鍙戞ā寮忥紙榛樿 3000 绔彛锛夛細
 
 ```bash
 npm run dev
 ```
 
-指定端口（推荐 3001）：
+鎸囧畾绔彛锛堟帹鑽?3001锛夛細
 
 ```bash
 npm run dev -- -p 3001
 ```
 
-生产构建：
-
+鐢熶骇鏋勫缓锛?
 ```bash
 npm run build
 npm run start -- -p 3001
 ```
 
-## 环境变量
+## 鐜鍙橀噺
 
-建议在 `apps/web/.env.local` 配置：
-
+寤鸿鍦?`apps/web/.env.local` 閰嶇疆锛?
 ```dotenv
-NEXT_PUBLIC_API_BASE_URL="http://localhost:3000"
-NEXT_PUBLIC_WS_BASE_URL="ws://localhost:3000"
+NEXT_PUBLIC_API_BASE_URL="http://localhost:3100"
+NEXT_PUBLIC_WS_BASE_URL="ws://localhost:3100"
 ```
 
-说明：
+璇存槑锛?
+- `NEXT_PUBLIC_API_BASE_URL`锛氬墠绔姹傚悗绔?HTTP API 鐨勫湴鍧€
+- `NEXT_PUBLIC_WS_BASE_URL`锛氬墠绔繛鎺?WebSocket 鐨勫熀纭€鍦板潃
 
-- `NEXT_PUBLIC_API_BASE_URL`：前端请求后端 HTTP API 的地址
-- `NEXT_PUBLIC_WS_BASE_URL`：前端连接 WebSocket 的基础地址
+## 椤甸潰璺敱
 
-## 页面路由
+- `/`锛氭柊鐢ㄦ埛璁胯皥鍏ュ彛
+- `/matches`锛氱洸鐩掑尮閰嶉〉
+- `/sandbox`锛氭矙鐩掕亰澶╅〉
+- `/admin`锛氬悗鍙伴厤缃〉锛堥渶绠＄悊鍛?Token锛?
+## 鐢ㄦ埛娴佺▼锛堝綋鍓嶇増鏈級
 
-- `/`：新用户访谈入口
-- `/matches`：盲盒匹配页
-- `/sandbox`：沙盒聊天页
-- `/admin`：后台配置页（需管理员 Token）
-
-## 用户流程（当前版本）
-
-1. 在 `/` 完成入场访谈
-2. 进入 `/matches` 运行匹配并查看候选对象
-3. 从匹配卡片进入 `/sandbox` 对话
-4. 共振分达到阈值后可发起破壁，破壁后切换直连聊天
-
-## 开发说明
-
-- 项目已关闭 Next.js 开发指示器（左下角 `N` 按钮）
-- 配置位置：`apps/web/next.config.ts` 的 `devIndicators: false`
+1. 鍦?`/` 瀹屾垚鍏ュ満璁胯皥
+2. 杩涘叆 `/matches` 杩愯鍖归厤骞舵煡鐪嬪€欓€夊璞?3. 浠庡尮閰嶅崱鐗囪繘鍏?`/sandbox` 瀵硅瘽
+4. 鍏辨尟鍒嗚揪鍒伴槇鍊煎悗鍙彂璧风牬澹侊紝鐮村鍚庡垏鎹㈢洿杩炶亰澶?
+## 寮€鍙戣鏄?
+- 椤圭洰宸插叧闂?Next.js 寮€鍙戞寚绀哄櫒锛堝乏涓嬭 `N` 鎸夐挳锛?- 閰嶇疆浣嶇疆锛歚apps/web/next.config.ts` 鐨?`devIndicators: false`

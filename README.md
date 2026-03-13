@@ -1,224 +1,176 @@
-# MindWall（心垣）
+# MindWall锛堝績鍨ｏ級
 
-MindWall 是一个 AI 中介的陌生人社交沙盒平台。  
-在“破壁”前，双方消息不会直接互传，而是先经过 AI 安全中间层审查、拦截或改写后再投递。
+MindWall 鏄竴涓?AI 涓粙鐨勯檶鐢熶汉绀句氦娌欑洅骞冲彴銆? 
+鍦ㄢ€滅牬澹佲€濆墠锛屽弻鏂规秷鎭笉浼氱洿鎺ヤ簰浼狅紝鑰屾槸鍏堢粡杩?AI 瀹夊叏涓棿灞傚鏌ャ€佹嫤鎴垨鏀瑰啓鍚庡啀鎶曢€掋€?
+## 椤圭洰缁撴瀯
 
-## 项目结构
+- `apps/web`锛歂ext.js 鍓嶇锛堢敤鎴烽〉 + 绠＄悊椤碉級
+- `apps/api`锛歂estJS 鍚庣锛堟帴鍙ｃ€佸尮閰嶅紩鎿庛€乄ebSocket銆佷腑闂村眰锛?- `infra`锛氬熀纭€璁炬柦閰嶇疆锛圥ostgreSQL/Redis锛?- `scripts`锛氫竴閿惎鍔ㄤ笌涓€閿儴缃叉洿鏂拌剼鏈?
+## 鎶€鏈爤
 
-- `apps/web`：Next.js 前端（用户页 + 管理页）
-- `apps/api`：NestJS 后端（接口、匹配引擎、WebSocket、中间层）
-- `infra`：基础设施配置（PostgreSQL/Redis）
-- `scripts`：一键启动与一键部署更新脚本
+- 鍓嶇锛歂ext.js + TypeScript + Tailwind CSS
+- 鍚庣锛歂estJS + TypeScript
+- 鏁版嵁搴擄細PostgreSQL + Prisma + pgvector
+- 缂撳瓨/瀹炴椂锛歊edis + 鍘熺敓 WebSocket
+- AI锛歄penAI锛堟敮鎸佸悗鍙板姩鎬侀厤缃級
 
-## 技术栈
-
-- 前端：Next.js + TypeScript + Tailwind CSS
-- 后端：NestJS + TypeScript
-- 数据库：PostgreSQL + Prisma + pgvector
-- 缓存/实时：Redis + 原生 WebSocket
-- AI：OpenAI（支持后台动态配置）
-
-## 本地一键启动
-
-Windows PowerShell：
-
+## 鏈湴涓€閿惎鍔?
+Windows PowerShell锛?
 ```powershell
 .\scripts\start-local.ps1
 ```
 
-Windows 双击启动：
-
+Windows 鍙屽嚮鍚姩锛?
 ```text
 scripts\start-local.cmd
 ```
 
-可选参数：
+鍙€夊弬鏁帮細
 
 ```powershell
 .\scripts\start-local.ps1 -SkipInstall -SkipMigrate -NoDocker
 ```
 
-脚本默认流程：
+鑴氭湰榛樿娴佺▼锛?
+1. 鍚姩 PostgreSQL + Redis锛圖ocker Compose锛?2. 瀹夎 API/Web 渚濊禆
+3. 鎵ц Prisma generate + migrate deploy
+4. 鍚姩 API 涓?Web 寮€鍙戞湇鍔?
+榛樿鍦板潃锛?
+- API锛歚http://localhost:3100`
+- Web锛歚http://localhost:3001`
 
-1. 启动 PostgreSQL + Redis（Docker Compose）
-2. 安装 API/Web 依赖
-3. 执行 Prisma generate + migrate deploy
-4. 启动 API 与 Web 开发服务
+## 鍚庡彴閰嶇疆锛圓I Key銆佹ā鍨嬨€佽法鍩燂級
 
-默认地址：
-
-- API：`http://localhost:3000`
-- Web：`http://localhost:3001`
-
-## 后台配置（AI Key、模型、跨域）
-
-MindWall 已支持“后台与前台分离”的运行时配置方式。
-
-1. 在环境变量设置后台口令：
-   - 根目录 `.env` 或 `apps/api/.env`
+MindWall 宸叉敮鎸佲€滃悗鍙颁笌鍓嶅彴鍒嗙鈥濈殑杩愯鏃堕厤缃柟寮忋€?
+1. 鍦ㄧ幆澧冨彉閲忚缃悗鍙板彛浠わ細
+   - 鏍圭洰褰?`.env` 鎴?`apps/api/.env`
    - `ADMIN_TOKEN=your-secret-token`
-2. 启动后访问管理页：
-   - `http://localhost:3001/admin`
-3. 在管理页填写并保存：
+2. 鍚姩鍚庤闂鐞嗛〉锛?   - `http://localhost:3001/admin`
+3. 鍦ㄧ鐞嗛〉濉啓骞朵繚瀛橈細
    - `OPENAI_API_KEY`
    - `OPENAI_MODEL`
    - `OPENAI_EMBEDDING_MODEL`
    - `WEB_ORIGIN`
 
-后端管理接口：
-
+鍚庣绠＄悊鎺ュ彛锛?
 - `GET /admin/config`
 - `PUT /admin/config`
-- 请求头必须带：`x-admin-token: <ADMIN_TOKEN>`
+- 璇锋眰澶村繀椤诲甫锛歚x-admin-token: <ADMIN_TOKEN>`
 
-运行时配置文件：
+杩愯鏃堕厤缃枃浠讹細
 
 - `apps/api/config/runtime-config.json`
 
-优先级规则：
+浼樺厛绾ц鍒欙細
 
-- 后台运行时配置 > 环境变量
+- 鍚庡彴杩愯鏃堕厤缃?> 鐜鍙橀噺
 
-说明：
+璇存槑锛?
+- 鐢ㄦ埛椤甸潰锛歚/`銆乣/matches`銆乣/sandbox`
+- 绠＄悊椤甸潰锛歚/admin`
+- API Key 浠呰繑鍥炶劚鏁忛瑙堬紝涓嶄細瀹屾暣涓嬪彂缁欏墠绔?
+## 鏈嶅姟鍣ㄤ竴閿儴缃?鏇存柊
 
-- 用户页面：`/`、`/matches`、`/sandbox`
-- 管理页面：`/admin`
-- API Key 仅返回脱敏预览，不会完整下发给前端
-
-## 服务器一键部署/更新
-
-Linux：
-
+Linux锛?
 ```bash
 chmod +x scripts/deploy-update.sh
 ./scripts/deploy-update.sh
 ```
 
-可选环境变量：
+鍙€夌幆澧冨彉閲忥細
 
-- `BRANCH`（默认 `main`）
-- `WEB_PORT`（默认 `3001`）
-
-示例：
-
+- `BRANCH`锛堥粯璁?`main`锛?- `WEB_PORT`锛堥粯璁?`3001`锛?
+绀轰緥锛?
 ```bash
 BRANCH=main WEB_PORT=3101 ./scripts/deploy-update.sh
 ```
 
-Windows Server：
-
+Windows Server锛?
 ```powershell
 .\scripts\deploy-update.ps1 -Branch main -WebPort 3001
 ```
 
-部署脚本默认流程：
+閮ㄧ讲鑴氭湰榛樿娴佺▼锛?
+1. 鎷夊彇鐩爣鍒嗘敮鏈€鏂颁唬鐮?2. 鍚姩鎴栨洿鏂?PostgreSQL + Redis
+3. 瀹夎渚濊禆锛坄npm ci`锛?4. Prisma generate + migrate deploy
+5. 鏋勫缓 API 涓?Web
+6. 鑻ュ瓨鍦?`pm2`锛岃嚜鍔ㄩ噸鍚?`mindwall-api` 涓?`mindwall-web`
 
-1. 拉取目标分支最新代码
-2. 启动或更新 PostgreSQL + Redis
-3. 安装依赖（`npm ci`）
-4. Prisma generate + migrate deploy
-5. 构建 API 与 Web
-6. 若存在 `pm2`，自动重启 `mindwall-api` 与 `mindwall-web`
-
-## 核心流程与接口
-
-### 1）入场访谈（Onboarding）
-
+## 鏍稿績娴佺▼涓庢帴鍙?
+### 1锛夊叆鍦鸿璋堬紙Onboarding锛?
 - `POST /onboarding/sessions`
-  - 请求体：`{ "auth_provider_id": "可选", "city": "可选" }`
-  - 返回：首轮问题、`session_id`、`user_id`
+  - 璇锋眰浣擄細`{ "auth_provider_id": "鍙€?, "city": "鍙€? }`
+  - 杩斿洖锛氶杞棶棰樸€乣session_id`銆乣user_id`
 - `POST /onboarding/sessions/:sessionId/messages`
-  - 请求体：`{ "message": "回答内容" }`
-  - 返回：
-    - 进行中：下一轮问题
-    - 完成：`public_tags` + `onboarding_summary`
+  - 璇锋眰浣擄細`{ "message": "鍥炵瓟鍐呭" }`
+  - 杩斿洖锛?    - 杩涜涓細涓嬩竴杞棶棰?    - 瀹屾垚锛歚public_tags` + `onboarding_summary`
 
-说明：
+璇存槑锛?
+- 闅愯棌绯荤粺鏍囩瀛樺偍鍦?`user_tags` 鐨?`HIDDEN_SYSTEM`
+- 瀵瑰 API 鍙繑鍥?`PUBLIC_VISIBLE`
 
-- 隐藏系统标签存储在 `user_tags` 的 `HIDDEN_SYSTEM`
-- 对外 API 只返回 `PUBLIC_VISIBLE`
-
-### 2）匹配引擎（Match Engine）
-
+### 2锛夊尮閰嶅紩鎿庯紙Match Engine锛?
 - `POST /match-engine/run`
-  - 参数：`city`、`max_matches_per_user`、`min_score`、`dry_run`
-  - 逻辑：同城分组 + 向量相似度 + 标签重合度 + 风险惩罚
+  - 鍙傛暟锛歚city`銆乣max_matches_per_user`銆乣min_score`銆乣dry_run`
+  - 閫昏緫锛氬悓鍩庡垎缁?+ 鍚戦噺鐩镐技搴?+ 鏍囩閲嶅悎搴?+ 椋庨櫓鎯╃綒
 - `GET /match-engine/users/:userId/matches`
-  - 返回盲盒匹配卡片（公开标签 + AI 匹配理由）
-  - 不返回真实头像、姓名
-
-### 3）沙盒聊天（Sandbox）
-
-HTTP：
-
+  - 杩斿洖鐩茬洅鍖归厤鍗＄墖锛堝叕寮€鏍囩 + AI 鍖归厤鐞嗙敱锛?  - 涓嶈繑鍥炵湡瀹炲ご鍍忋€佸鍚?
+### 3锛夋矙鐩掕亰澶╋紙Sandbox锛?
+HTTP锛?
 - `GET /sandbox/matches/:matchId/messages?user_id=<id>&limit=50`
 
-WebSocket：
-
-- 地址：`/ws/sandbox`
-- 前端环境变量：`NEXT_PUBLIC_WS_BASE_URL`（默认 `ws://localhost:3000`）
-
-客户端事件示例：
+WebSocket锛?
+- 鍦板潃锛歚/ws/sandbox`
+- 鍓嶇鐜鍙橀噺锛歚NEXT_PUBLIC_WS_BASE_URL`锛堥粯璁?`ws://localhost:3100`锛?
+瀹㈡埛绔簨浠剁ず渚嬶細
 
 - `{"type":"auth","user_id":"..."}`
 - `{"type":"join_match","match_id":"..."}`
 - `{"type":"fetch_history","match_id":"...","limit":50}`
 - `{"type":"sandbox_message","match_id":"...","text":"..."}`
 
-服务端关键事件：
+鏈嶅姟绔叧閿簨浠讹細
 
-- `connected`、`auth_ok`、`join_ok`、`history`
-- `sandbox_message`、`message_delivered`、`message_blocked`
-- `resonance_update`、`wall_ready`、`error`
-- `wall_state`、`wall_break_decision`、`wall_break_update`、`wall_broken`
-- `direct_message`（破壁后直连）
-
-### 4）破壁（Wall Break）
-
-触发条件：
-
+- `connected`銆乣auth_ok`銆乣join_ok`銆乣history`
+- `sandbox_message`銆乣message_delivered`銆乣message_blocked`
+- `resonance_update`銆乣wall_ready`銆乣error`
+- `wall_state`銆乣wall_break_decision`銆乣wall_break_update`銆乣wall_broken`
+- `direct_message`锛堢牬澹佸悗鐩磋繛锛?
+### 4锛夌牬澹侊紙Wall Break锛?
+瑙﹀彂鏉′欢锛?
 - `resonance_score >= 100`
 
-机制：
-
-- 双方都发送 `wall_break_decision` 且 `accept=true`
-- 达成后：
+鏈哄埗锛?
+- 鍙屾柟閮藉彂閫?`wall_break_decision` 涓?`accept=true`
+- 杈炬垚鍚庯細
   - `matches.status -> wall_broken`
   - `user_profiles.is_wall_broken -> true`
-  - 客户端从 `sandbox_message` 切换到 `direct_message`
+  - 瀹㈡埛绔粠 `sandbox_message` 鍒囨崲鍒?`direct_message`
 
-## 前端页面
+## 鍓嶇椤甸潰
 
-- `/`：新用户访谈入口
-- `/matches`：盲盒匹配页
-- `/sandbox`：沙盒聊天页（支持一键连接并进入聊天）
-- `/admin`：后台配置页（AI Key、模型、跨域）
+- `/`锛氭柊鐢ㄦ埛璁胯皥鍏ュ彛
+- `/matches`锛氱洸鐩掑尮閰嶉〉
+- `/sandbox`锛氭矙鐩掕亰澶╅〉锛堟敮鎸佷竴閿繛鎺ュ苟杩涘叆鑱婂ぉ锛?- `/admin`锛氬悗鍙伴厤缃〉锛圓I Key銆佹ā鍨嬨€佽法鍩燂級
 
-## 演示冒烟测试
+## 婕旂ず鍐掔儫娴嬭瘯
 
-1. 启动数据库并运行迁移，确保 API/Web 已启动
-2. 在 `apps/api` 执行：
-
+1. 鍚姩鏁版嵁搴撳苟杩愯杩佺Щ锛岀‘淇?API/Web 宸插惎鍔?2. 鍦?`apps/api` 鎵ц锛?
 ```bash
 npm run seed:demo
 ```
 
-3. 继续执行：
-
+3. 缁х画鎵ц锛?
 ```bash
 npm run smoke:ws
 ```
 
-验证内容：
+楠岃瘉鍐呭锛?
+- 娌欑洅娑堟伅鏀瑰啓/鎶曢€掗摼璺?- 鍏辨尟鍒嗚揪鍒板彲鐮村闃堝€?- 鍙屾柟鐮村鍚屾剰鐘舵€佹祦杞?- 鐮村鍚庣洿杩炴秷鎭€氳矾
 
-- 沙盒消息改写/投递链路
-- 共振分达到可破壁阈值
-- 双方破壁同意状态流转
-- 破壁后直连消息通路
+## 甯歌闂
 
-## 常见问题
+### 鍓嶇宸︿笅瑙?`N` 鎸夐挳鏄粈涔堬紵
 
-### 前端左下角 `N` 按钮是什么？
-
-这是 Next.js 开发模式的 Dev Indicator（开发工具入口），不是业务功能。  
-项目已在 `apps/web/next.config.ts` 中通过 `devIndicators: false` 关闭。
+杩欐槸 Next.js 寮€鍙戞ā寮忕殑 Dev Indicator锛堝紑鍙戝伐鍏峰叆鍙ｏ級锛屼笉鏄笟鍔″姛鑳姐€? 
+椤圭洰宸插湪 `apps/web/next.config.ts` 涓€氳繃 `devIndicators: false` 鍏抽棴銆?

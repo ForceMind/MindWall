@@ -1,4 +1,7 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { SessionAuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { SessionUser } from '../auth/auth.types';
 import { MatchEngineService } from './match-engine.service';
 
 interface RunMatchEngineBody {
@@ -20,5 +23,11 @@ export class MatchEngineController {
   @Get('users/:userId/matches')
   async getUserMatches(@Param('userId') userId: string) {
     return this.matchEngineService.getUserMatches(userId);
+  }
+
+  @Get('me/matches')
+  @UseGuards(SessionAuthGuard)
+  async getMyMatches(@CurrentUser() user: SessionUser) {
+    return this.matchEngineService.getUserMatches(user.userId);
   }
 }

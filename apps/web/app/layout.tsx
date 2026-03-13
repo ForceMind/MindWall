@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "MindWall | 心垣",
-  description: "AI 中介的零信任社交沙盒平台",
+  description: "AI 中介的零信任陌生人社交沙盒平台",
 };
 
 export default function RootLayout({

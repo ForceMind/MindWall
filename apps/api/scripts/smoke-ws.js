@@ -2,8 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
-const WS_BASE_URL = process.env.WS_BASE_URL || 'ws://localhost:3000';
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3100';
+const WS_BASE_URL = process.env.WS_BASE_URL || 'ws://localhost:3100';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
