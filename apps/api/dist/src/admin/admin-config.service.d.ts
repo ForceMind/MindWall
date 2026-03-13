@@ -1,9 +1,12 @@
+import { ServerLogService } from '../telemetry/server-log.service';
 import { AiRuntimeConfig, RuntimeConfig } from './admin.types';
 export declare class AdminConfigService {
+    private readonly serverLogService;
     private readonly logger;
     private readonly configDir;
     private readonly configFile;
     private readonly defaultOpenAiBaseUrl;
+    constructor(serverLogService: ServerLogService);
     getAiConfig(): Promise<AiRuntimeConfig>;
     getPublicConfig(): Promise<{
         openai_base_url: string;

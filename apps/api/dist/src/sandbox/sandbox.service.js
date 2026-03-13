@@ -15,13 +15,22 @@ const common_1 = require("@nestjs/common");
 const client_1 = require("@prisma/client");
 const admin_config_service_1 = require("../admin/admin-config.service");
 const prisma_service_1 = require("../prisma/prisma.service");
+const ai_usage_service_1 = require("../telemetry/ai-usage.service");
+const prompt_template_service_1 = require("../telemetry/prompt-template.service");
+const server_log_service_1 = require("../telemetry/server-log.service");
 let SandboxService = SandboxService_1 = class SandboxService {
     prisma;
     adminConfigService;
+    promptTemplateService;
+    aiUsageService;
+    serverLogService;
     logger = new common_1.Logger(SandboxService_1.name);
-    constructor(prisma, adminConfigService) {
+    constructor(prisma, adminConfigService, promptTemplateService, aiUsageService, serverLogService) {
         this.prisma = prisma;
         this.adminConfigService = adminConfigService;
+        this.promptTemplateService = promptTemplateService;
+        this.aiUsageService = aiUsageService;
+        this.serverLogService = serverLogService;
     }
     async ensureUserExists(userId) {
         const found = await this.prisma.user.findUnique({
@@ -284,11 +293,15 @@ let SandboxService = SandboxService_1 = class SandboxService {
         const profiles = await this.getProfilePair(info.userAId, info.userBId);
         const selfProfile = profiles.get(info.senderId) || {
             userId: info.senderId,
+            anonymousName: null,
+            anonymousAvatar: null,
             realName: null,
             realAvatar: null,
         };
         const counterpartProfile = profiles.get(info.receiverId) || {
             userId: info.receiverId,
+            anonymousName: null,
+            anonymousAvatar: null,
             realName: null,
             realAvatar: null,
         };
@@ -319,6 +332,8 @@ let SandboxService = SandboxService_1 = class SandboxService {
             },
             select: {
                 user_id: true,
+                anonymous_name: true,
+                anonymous_avatar: true,
                 real_name: true,
                 real_avatar: true,
             },
@@ -327,6 +342,8 @@ let SandboxService = SandboxService_1 = class SandboxService {
         for (const row of rows) {
             map.set(row.user_id, {
                 userId: row.user_id,
+                anonymousName: row.anonymous_name,
+                anonymousAvatar: row.anonymous_avatar,
                 realName: row.real_name,
                 realAvatar: row.real_avatar,
             });
@@ -388,9 +405,9 @@ let SandboxService = SandboxService_1 = class SandboxService {
         const receiverPublic = input.receiverTags
             .filter((item) => item.type === client_1.UserTagType.PUBLIC_VISIBLE)
             .slice(0, 8);
-        const prompt = [
+        const fallbackPrompt = [
             'You are MindWall sandbox middleware.',
-            'Evaluate a message for safety and rewrite if needed.',
+            'Evaluate user message for safety and rewrite if needed.',
             'Return strict JSON only with this schema:',
             '{',
             '  "ai_action":"passed|blocked|modified",',
@@ -399,11 +416,14 @@ let SandboxService = SandboxService_1 = class SandboxService {
             '  "reason":"short reason"',
             '}',
             'Rules:',
-            '- Block if asks contact info, sexual content, coercion, insults, threats.',
-            '- If safe but harsh tone, modify to respectful tone.',
-            '- Keep semantic intent when modifying.',
+            '- Block if asks for contact exchange, sexual solicitation, insults, threats, coercion.',
+            '- If safe but rough, rewrite to respectful tone.',
+            '- Keep semantic intent while rewriting.',
             '- hidden_tag_updates values are deltas in range [-2.5, 2.5].',
-            '',
+        ].join('\n');
+        const basePrompt = await this.promptTemplateService.getPrompt('sandbox.middleware', fallbackPrompt);
+        const prompt = [
+            basePrompt,
             `sender_id: ${input.senderId}`,
             `receiver_id: ${input.receiverId}`,
             `sender_public_tags: ${JSON.stringify(senderPublic)}`,
@@ -411,7 +431,11 @@ let SandboxService = SandboxService_1 = class SandboxService {
             `receiver_public_tags: ${JSON.stringify(receiverPublic)}`,
             `message: ${input.text}`,
         ].join('\n');
-        const result = await this.callOpenAiJson(prompt);
+        const result = await this.callOpenAiJson(prompt, {
+            feature: 'sandbox.middleware',
+            promptKey: 'sandbox.middleware',
+            userId: input.senderId,
+        });
         if (!result) {
             return this.fallbackMiddleware(input.text);
         }
@@ -429,7 +453,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
             : 'passed';
         const rewrittenBase = (input.rewrittenText || '').trim();
         const rewrittenText = action === 'blocked'
-            ? rewrittenBase || 'Message blocked by safety middleware.'
+            ? rewrittenBase || '消息已被安全中间层拦截。'
             : rewrittenBase || input.originalText;
         return {
             aiAction: action,
@@ -439,14 +463,14 @@ let SandboxService = SandboxService_1 = class SandboxService {
         };
     }
     fallbackMiddleware(text) {
-        const contactPattern = /(wechat|vx|wx|telegram|whatsapp|line|qq|contact|phone|number|email|加我|微信|手机号|\b\d{7,}\b)/i;
-        const sexualPattern = /(nude|sex|escort|色情|裸照|约炮|开房|性暗示|私密照)/i;
-        const abusePattern = /(fuck\s*you|bitch|idiot|loser|stupid|傻逼|废物|贱人|滚开|脑残)/i;
+        const contactPattern = /(wechat|vx|wx|telegram|whatsapp|line|qq|contact|phone|number|email|加我|微信|手机号|电话号码|联系方式|私聊外站|二维码|群号|\b\d{7,}\b)/i;
+        const sexualPattern = /(nude|sex|escort|色情|裸照|约炮|性暗示|私密照|开房|做爱)/i;
+        const abusePattern = /(fuck\s*you|bitch|idiot|loser|stupid|傻逼|废物|贱人|滚开|脑残|去死)/i;
         const normalized = text.trim().replace(/\s+/g, ' ');
         if (contactPattern.test(normalized)) {
             return {
                 aiAction: 'blocked',
-                rewrittenText: 'Message blocked by safety middleware.',
+                rewrittenText: '消息已被安全中间层拦截。',
                 hiddenTagUpdates: { harassment_tendency: 1.2 },
                 reason: 'blocked: attempted off-platform contact exchange',
             };
@@ -454,7 +478,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
         if (sexualPattern.test(normalized)) {
             return {
                 aiAction: 'blocked',
-                rewrittenText: 'Message blocked by safety middleware.',
+                rewrittenText: '消息已被安全中间层拦截。',
                 hiddenTagUpdates: { harassment_tendency: 1.8 },
                 reason: 'blocked: sexual solicitation detected',
             };
@@ -462,7 +486,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
         if (abusePattern.test(normalized)) {
             return {
                 aiAction: 'blocked',
-                rewrittenText: 'Message blocked by safety middleware.',
+                rewrittenText: '消息已被安全中间层拦截。',
                 hiddenTagUpdates: { harassment_tendency: 1.5, empathy: -0.8 },
                 reason: 'blocked: abusive language detected',
             };
@@ -488,11 +512,11 @@ let SandboxService = SandboxService_1 = class SandboxService {
         next = next.replace(/你必须/g, '你愿不愿意');
         next = next.replace(/赶紧/g, '方便的话尽快');
         next = next.replace(/立刻/g, '尽快');
-        next = next.replace(/!!+/g, '.');
-        next = next.replace(/\?\?+/g, '?');
+        next = next.replace(/!!+/g, '。');
+        next = next.replace(/\?\?+/g, '？');
         next = next.replace(/\s{2,}/g, ' ');
         if (!/[.!?。！？]$/.test(next)) {
-            next = `${next}.`;
+            next = `${next}。`;
         }
         return next.trim();
     }
@@ -551,7 +575,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
             });
         }
     }
-    async callOpenAiJson(prompt) {
+    async callOpenAiJson(prompt, options) {
         const aiConfig = await this.adminConfigService.getAiConfig();
         const apiKey = aiConfig.openaiApiKey;
         if (!apiKey) {
@@ -584,9 +608,26 @@ let SandboxService = SandboxService_1 = class SandboxService {
             if (!response.ok) {
                 const detail = await response.text();
                 this.logger.warn(`OpenAI middleware failed: ${response.status} ${detail}`);
+                await this.serverLogService.warn('sandbox.openai.failed', 'openai middleware failed', {
+                    status: response.status,
+                    feature: options.feature,
+                    detail: detail.slice(0, 280),
+                });
                 return null;
             }
             const payload = (await response.json());
+            const usage = payload.usage;
+            await this.aiUsageService.logGeneration({
+                userId: options.userId,
+                feature: options.feature,
+                promptKey: options.promptKey,
+                provider: 'openai',
+                model,
+                inputTokens: usage?.prompt_tokens || 0,
+                outputTokens: usage?.completion_tokens || 0,
+                totalTokens: usage?.total_tokens ||
+                    (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+            });
             const content = payload.choices?.[0]?.message?.content?.trim();
             if (!content) {
                 return null;
@@ -596,6 +637,10 @@ let SandboxService = SandboxService_1 = class SandboxService {
         }
         catch (error) {
             this.logger.warn(`OpenAI middleware error: ${error.message}`);
+            await this.serverLogService.warn('sandbox.openai.error', 'openai middleware error', {
+                feature: options.feature,
+                error: error.message,
+            });
             return null;
         }
     }
@@ -617,6 +662,9 @@ exports.SandboxService = SandboxService;
 exports.SandboxService = SandboxService = SandboxService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        admin_config_service_1.AdminConfigService])
+        admin_config_service_1.AdminConfigService,
+        prompt_template_service_1.PromptTemplateService,
+        ai_usage_service_1.AiUsageService,
+        server_log_service_1.ServerLogService])
 ], SandboxService);
 //# sourceMappingURL=sandbox.service.js.map

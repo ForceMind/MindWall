@@ -15,18 +15,18 @@ import {
 } from 'crypto';
 import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
+import { ServerLogService } from '../telemetry/server-log.service';
 import type { SessionUser } from './auth.types';
 
 const scryptAsync = promisify(scrypt);
 
 interface RegisterBody {
-  email?: string;
+  username?: string;
   password?: string;
-  display_name?: string;
 }
 
 interface LoginBody {
-  email?: string;
+  username?: string;
   password?: string;
 }
 
@@ -34,35 +34,35 @@ interface LoginBody {
 export class AuthService {
   private readonly sessionTtlMs = 1000 * 60 * 60 * 24 * 30;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly serverLogService: ServerLogService,
+  ) {}
 
   async register(body: RegisterBody) {
     try {
-      const email = this.normalizeEmail(body.email);
+      const username = this.normalizeUsername(body.username);
       const password = this.normalizePassword(body.password);
-      const displayName = this.normalizeDisplayName(body.display_name);
 
       const existing = await this.prisma.userCredential.findUnique({
-        where: { email },
+        where: { username },
         select: { user_id: true },
       });
       if (existing) {
-        throw new ConflictException('Email is already registered.');
+        throw new ConflictException('Username is already registered.');
       }
 
       const passwordHash = await this.hashPassword(password);
       const created = await this.prisma.user.create({
         data: {
-          auth_provider_id: `local:${email}`,
+          auth_provider_id: `local:${username}`,
           status: UserStatus.onboarding,
           profile: {
-            create: {
-              real_name: displayName || undefined,
-            },
+            create: {},
           },
           credential: {
             create: {
-              email,
+              username,
               password_hash: passwordHash,
             },
           },
@@ -74,6 +74,10 @@ export class AuthService {
 
       const session = await this.createSession(created.id);
       const me = await this.getMe(created.id);
+      await this.serverLogService.info('auth.register', 'user registered', {
+        user_id: created.id,
+        username,
+      });
 
       return {
         session_token: session.token,
@@ -87,27 +91,31 @@ export class AuthService {
 
   async login(body: LoginBody) {
     try {
-      const email = this.normalizeEmail(body.email);
+      const username = this.normalizeUsername(body.username);
       const password = this.normalizePassword(body.password);
 
       const credential = await this.prisma.userCredential.findUnique({
-        where: { email },
+        where: { username },
         select: {
           user_id: true,
           password_hash: true,
         },
       });
       if (!credential) {
-        throw new UnauthorizedException('Invalid email or password.');
+        throw new UnauthorizedException('Invalid username or password.');
       }
 
       const valid = await this.verifyPassword(password, credential.password_hash);
       if (!valid) {
-        throw new UnauthorizedException('Invalid email or password.');
+        throw new UnauthorizedException('Invalid username or password.');
       }
 
       const session = await this.createSession(credential.user_id);
       const me = await this.getMe(credential.user_id);
+      await this.serverLogService.info('auth.login', 'user login success', {
+        user_id: credential.user_id,
+        username,
+      });
 
       return {
         session_token: session.token,
@@ -129,13 +137,17 @@ export class AuthService {
           created_at: true,
           credential: {
             select: {
-              email: true,
+              username: true,
             },
           },
           profile: {
             select: {
               real_name: true,
               real_avatar: true,
+              anonymous_name: true,
+              anonymous_avatar: true,
+              gender: true,
+              age: true,
               city: true,
               is_wall_broken: true,
             },
@@ -164,7 +176,7 @@ export class AuthService {
       return {
         user: {
           id: user.id,
-          email: user.credential.email,
+          username: user.credential.username,
           status: user.status,
           created_at: user.created_at,
         },
@@ -186,6 +198,10 @@ export class AuthService {
         data: {
           revoked_at: new Date(),
         },
+      });
+
+      await this.serverLogService.info('auth.logout', 'user logout', {
+        session_id: sessionId,
       });
 
       return {
@@ -218,7 +234,7 @@ export class AuthService {
               status: true,
               credential: {
                 select: {
-                  email: true,
+                  username: true,
                 },
               },
             },
@@ -235,10 +251,17 @@ export class AuthService {
         return null;
       }
 
+      await this.prisma.authSession.update({
+        where: { id: session.id },
+        data: {
+          last_seen_at: new Date(),
+        },
+      });
+
       return {
         sessionId: session.id,
         userId: session.user_id,
-        email: session.user.credential.email,
+        username: session.user.credential.username,
         status: session.user.status,
       };
     } catch (error) {
@@ -255,6 +278,7 @@ export class AuthService {
         user_id: userId,
         token_hash: this.hashToken(token),
         expires_at: expiresAt,
+        last_seen_at: new Date(),
       },
     });
 
@@ -300,13 +324,20 @@ export class AuthService {
     return token;
   }
 
-  private normalizeEmail(email?: string) {
-    const normalized = email?.trim().toLowerCase();
+  private normalizeUsername(username?: string) {
+    const normalized = (username || '').trim().normalize('NFKC').toLowerCase();
     if (!normalized) {
-      throw new BadRequestException('email is required.');
+      throw new BadRequestException('username is required.');
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
-      throw new BadRequestException('email format is invalid.');
+    if (normalized.length < 2 || normalized.length > 24) {
+      throw new BadRequestException(
+        'username must be between 2 and 24 characters.',
+      );
+    }
+    if (!/^[\p{L}\p{N}_-]+$/u.test(normalized)) {
+      throw new BadRequestException(
+        'username can only contain letters, numbers, underscore, and hyphen.',
+      );
     }
     return normalized;
   }
@@ -316,18 +347,10 @@ export class AuthService {
     if (!normalized) {
       throw new BadRequestException('password is required.');
     }
-    if (normalized.length < 8) {
-      throw new BadRequestException('password must be at least 8 characters.');
+    if (normalized.length < 6) {
+      throw new BadRequestException('password must be at least 6 characters.');
     }
     return normalized;
-  }
-
-  private normalizeDisplayName(displayName?: string) {
-    const normalized = displayName?.trim() || '';
-    if (!normalized) {
-      return '';
-    }
-    return normalized.slice(0, 48);
   }
 
   private rethrowAuthInfraError(error: unknown): never {

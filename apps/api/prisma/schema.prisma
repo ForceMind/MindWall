@@ -39,6 +39,7 @@ model User {
   credential       UserCredential?
   sessions         AuthSession[]
   tags             UserTag[]
+  ai_logs          AiGenerationLog[]
   matches_a        Match[]          @relation("MatchUserA")
   matches_b        Match[]          @relation("MatchUserB")
   sent_messages    SandboxMessage[] @relation("SentMessages")
@@ -49,7 +50,7 @@ model User {
 
 model UserCredential {
   user_id        String   @id @db.Uuid
-  email          String   @unique @db.VarChar(320)
+  username       String   @unique @map("email") @db.VarChar(320)
   password_hash  String   @db.Text
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
@@ -63,11 +64,13 @@ model AuthSession {
   user_id    String   @db.Uuid
   token_hash String   @unique @db.VarChar(64)
   expires_at DateTime
+  last_seen_at DateTime @default(now())
   revoked_at DateTime?
   created_at DateTime @default(now())
   user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, expires_at])
+  @@index([last_seen_at])
   @@index([token_hash])
   @@map("auth_sessions")
 }
@@ -76,6 +79,10 @@ model UserProfile {
   user_id        String   @id @db.Uuid
   real_avatar    String?
   real_name      String?
+  anonymous_avatar String?
+  anonymous_name String?  @db.VarChar(64)
+  gender         String?  @db.VarChar(16)
+  age            Int?
   city           String?  @db.VarChar(128)
   is_wall_broken Boolean  @default(false)
   updated_at     DateTime @updatedAt
@@ -140,4 +147,39 @@ model SandboxMessage {
   @@index([match_id, created_at])
   @@index([sender_id, created_at])
   @@map("sandbox_messages")
+}
+
+model AiGenerationLog {
+  id                 String   @id @default(uuid()) @db.Uuid
+  user_id            String?  @db.Uuid
+  feature            String   @db.VarChar(64)
+  prompt_key         String?  @db.VarChar(64)
+  provider           String   @default("openai") @db.VarChar(32)
+  model              String   @db.VarChar(128)
+  input_tokens       Int      @default(0)
+  output_tokens      Int      @default(0)
+  total_tokens       Int      @default(0)
+  estimated_cost_usd Decimal  @default(0) @db.Decimal(12, 6)
+  metadata           Json?
+  created_at         DateTime @default(now())
+  user               User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([feature, created_at])
+  @@index([user_id, created_at])
+  @@map("ai_generation_logs")
+}
+
+model PromptTemplate {
+  id           String   @id @default(uuid()) @db.Uuid
+  key          String   @unique @db.VarChar(64)
+  name         String   @db.VarChar(128)
+  category     String   @db.VarChar(64)
+  content      String   @db.Text
+  version      Int      @default(1)
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  @@index([category, is_active])
+  @@map("prompt_templates")
 }

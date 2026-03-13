@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { ServerLogService } from '../telemetry/server-log.service';
 import { AiRuntimeConfig, RuntimeConfig } from './admin.types';
 
 @Injectable()
@@ -9,6 +10,8 @@ export class AdminConfigService {
   private readonly configDir = path.join(process.cwd(), 'config');
   private readonly configFile = path.join(this.configDir, 'runtime-config.json');
   private readonly defaultOpenAiBaseUrl = 'https://api.openai.com/v1';
+
+  constructor(private readonly serverLogService: ServerLogService) {}
 
   async getAiConfig(): Promise<AiRuntimeConfig> {
     const runtime = await this.readRuntimeConfig();
@@ -99,6 +102,11 @@ export class AdminConfigService {
 
     await this.writeRuntimeConfig(next);
     this.logger.log(`Runtime config updated: ${this.configFile}`);
+    await this.serverLogService.info(
+      'admin.config.update',
+      'runtime config updated',
+      { updated_fields: Object.keys(input) },
+    );
 
     return this.getPublicConfig();
   }

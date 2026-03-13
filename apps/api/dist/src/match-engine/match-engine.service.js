@@ -15,13 +15,22 @@ const common_1 = require("@nestjs/common");
 const client_1 = require("@prisma/client");
 const admin_config_service_1 = require("../admin/admin-config.service");
 const prisma_service_1 = require("../prisma/prisma.service");
+const ai_usage_service_1 = require("../telemetry/ai-usage.service");
+const prompt_template_service_1 = require("../telemetry/prompt-template.service");
+const server_log_service_1 = require("../telemetry/server-log.service");
 let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
     prisma;
     adminConfigService;
+    promptTemplateService;
+    aiUsageService;
+    serverLogService;
     logger = new common_1.Logger(MatchEngineService_1.name);
-    constructor(prisma, adminConfigService) {
+    constructor(prisma, adminConfigService, promptTemplateService, aiUsageService, serverLogService) {
         this.prisma = prisma;
         this.adminConfigService = adminConfigService;
+        this.promptTemplateService = promptTemplateService;
+        this.aiUsageService = aiUsageService;
+        this.serverLogService = serverLogService;
     }
     async run(body) {
         const city = body.city?.trim() || null;
@@ -152,6 +161,13 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
             perUserCounter.set(candidate.userAId, aCount + 1);
             perUserCounter.set(candidate.userBId, bCount + 1);
         }
+        await this.serverLogService.info('match.run', 'match engine executed', {
+            city_scope: city || 'ALL',
+            considered_users: users.length,
+            candidate_pairs: candidates.length,
+            created_matches: created.length,
+            dry_run: dryRun,
+        });
         return {
             status: 'ok',
             city_scope: city || 'ALL',
@@ -191,7 +207,7 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
                 ai_match_reason: true,
             },
         });
-        const counterpartIds = Array.from(new Set(matches.map((item) => (item.user_a_id === userId ? item.user_b_id : item.user_a_id))));
+        const counterpartIds = Array.from(new Set(matches.map((item) => item.user_a_id === userId ? item.user_b_id : item.user_a_id)));
         const [counterpartTags, counterpartProfiles] = await Promise.all([
             this.prisma.userTag.findMany({
                 where: {
@@ -213,6 +229,8 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
                 select: {
                     user_id: true,
                     city: true,
+                    anonymous_name: true,
+                    anonymous_avatar: true,
                 },
             }),
         ]);
@@ -228,7 +246,14 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
             }
             tagMap.set(tag.user_id, bucket);
         }
-        const cityMap = new Map(counterpartProfiles.map((profile) => [profile.user_id, profile.city]));
+        const profileMap = new Map(counterpartProfiles.map((profile) => [
+            profile.user_id,
+            {
+                city: profile.city,
+                anonymous_name: profile.anonymous_name,
+                anonymous_avatar: profile.anonymous_avatar,
+            },
+        ]));
         return {
             user_id: userId,
             total_matches: matches.length,
@@ -238,10 +263,13 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
                     match_id: item.id,
                     status: item.status,
                     resonance_score: item.resonance_score,
-                    ai_match_reason: item.ai_match_reason || '你们在核心价值与沟通方式上存在同频。',
+                    ai_match_reason: item.ai_match_reason ||
+                        '你们在沟通节奏和公开标签上有较高重合，适合先进入匿名沙盒交流。',
                     counterpart: {
                         user_id: counterpartId,
-                        city: cityMap.get(counterpartId) || null,
+                        city: profileMap.get(counterpartId)?.city || null,
+                        anonymous_name: profileMap.get(counterpartId)?.anonymous_name || null,
+                        anonymous_avatar: profileMap.get(counterpartId)?.anonymous_avatar || null,
                         public_tags: tagMap.get(counterpartId) || [],
                     },
                 };
@@ -388,26 +416,49 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
             .sort((a, b) => b.weight - a.weight)
             .slice(0, 4)
             .map((item) => item.tag_name);
+        const defaultPrompt = [
+            '你是匿名交友平台的匹配理由生成器。',
+            '请基于双方公开标签输出一句中文匹配理由。',
+            '要求：',
+            '- 20 到 45 个中文字符',
+            '- 不包含隐私字段',
+            '- 不提及隐藏标签',
+            '- 语气自然，不模板化',
+            '只输出 JSON：{"reason":"..."}',
+        ].join('\n');
+        const basePrompt = await this.promptTemplateService.getPrompt('match.reason', defaultPrompt);
+        const payload = await this.callOpenAiJson([
+            basePrompt,
+            `城市: ${city}`,
+            `匹配分数: ${score}`,
+            `A 标签: ${firstPublic.join('、') || '暂无'}`,
+            `B 标签: ${secondPublic.join('、') || '暂无'}`,
+        ].join('\n'), {
+            feature: 'match.reason',
+            promptKey: 'match.reason',
+        });
+        const reason = payload?.reason?.trim();
+        if (!reason) {
+            return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
+        }
+        return reason.slice(0, 90);
+    }
+    fallbackMatchReason(firstTags, secondTags, score, city) {
+        const shared = firstTags.find((item) => secondTags.includes(item));
+        if (shared) {
+            return `你们同在${city}，且都偏向“${shared}”式交流，当前共鸣分约 ${score}。`;
+        }
+        const left = firstTags[0] || '真诚表达';
+        const right = secondTags[0] || '稳定沟通';
+        return `你们同在${city}，一方偏向“${left}”，另一方偏向“${right}”，组合互补度较高。`;
+    }
+    async callOpenAiJson(prompt, options) {
         const aiConfig = await this.adminConfigService.getAiConfig();
         const apiKey = aiConfig.openaiApiKey;
         if (!apiKey) {
-            return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
+            return null;
         }
         const model = aiConfig.openaiModel;
-        const prompt = [
-            '你是社交匹配引擎的理由生成器。',
-            '请基于双方公开标签给出一句中文匹配理由。',
-            '要求:',
-            '- 20到45字',
-            '- 不包含任何隐私字段',
-            '- 不要提及隐藏标签',
-            '- 语气自然，不要模板腔',
-            '只输出JSON: {"reason":"..."}',
-            `城市: ${city}`,
-            `匹配分数: ${score}`,
-            `A标签: ${firstPublic.join('、') || '暂无'}`,
-            `B标签: ${secondPublic.join('、') || '暂无'}`,
-        ].join('\n');
         try {
             const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
                 method: 'POST',
@@ -417,12 +468,12 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
                 },
                 body: JSON.stringify({
                     model,
-                    temperature: 0.7,
+                    temperature: 0.6,
                     response_format: { type: 'json_object' },
                     messages: [
                         {
                             role: 'system',
-                            content: '你只返回JSON对象，不要输出额外内容。',
+                            content: 'You are a strict JSON generator. Output one JSON object only.',
                         },
                         {
                             role: 'user',
@@ -434,33 +485,40 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
             if (!response.ok) {
                 const detail = await response.text();
                 this.logger.warn(`match reason failed: ${response.status} ${detail}`);
-                return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
+                await this.serverLogService.warn('match.openai.failed', 'openai call failed', {
+                    feature: options.feature,
+                    status: response.status,
+                    detail: detail.slice(0, 280),
+                });
+                return null;
             }
             const payload = (await response.json());
+            const usage = payload.usage;
+            await this.aiUsageService.logGeneration({
+                userId: options.userId,
+                feature: options.feature,
+                promptKey: options.promptKey,
+                provider: 'openai',
+                model,
+                inputTokens: usage?.prompt_tokens || 0,
+                outputTokens: usage?.completion_tokens || 0,
+                totalTokens: usage?.total_tokens ||
+                    (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+            });
             const content = payload.choices?.[0]?.message?.content?.trim();
             if (!content) {
-                return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
+                return null;
             }
-            const parsed = this.safeParseJson(content);
-            const reason = parsed?.reason?.trim();
-            if (!reason) {
-                return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
-            }
-            return reason.slice(0, 80);
+            return this.safeParseJson(content);
         }
         catch (error) {
             this.logger.warn(`match reason error: ${error.message}`);
-            return this.fallbackMatchReason(firstPublic, secondPublic, score, city);
+            await this.serverLogService.warn('match.openai.error', 'openai call error', {
+                feature: options.feature,
+                error: error.message,
+            });
+            return null;
         }
-    }
-    fallbackMatchReason(firstTags, secondTags, score, city) {
-        const shared = firstTags.find((item) => secondTags.includes(item));
-        if (shared) {
-            return `你们同在${city}，并且都偏好「${shared}」式交流，初始同频度约${score}分。`;
-        }
-        const left = firstTags[0] || '真诚表达';
-        const right = secondTags[0] || '稳定沟通';
-        return `你们同在${city}，一方偏向「${left}」，另一方偏向「${right}」，组合互补度较高。`;
     }
     safeParseJson(raw) {
         const text = raw
@@ -486,6 +544,9 @@ exports.MatchEngineService = MatchEngineService;
 exports.MatchEngineService = MatchEngineService = MatchEngineService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        admin_config_service_1.AdminConfigService])
+        admin_config_service_1.AdminConfigService,
+        prompt_template_service_1.PromptTemplateService,
+        ai_usage_service_1.AiUsageService,
+        server_log_service_1.ServerLogService])
 ], MatchEngineService);
 //# sourceMappingURL=match-engine.service.js.map

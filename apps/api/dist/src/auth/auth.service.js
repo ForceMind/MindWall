@@ -15,38 +15,38 @@ const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
 const util_1 = require("util");
 const prisma_service_1 = require("../prisma/prisma.service");
+const server_log_service_1 = require("../telemetry/server-log.service");
 const scryptAsync = (0, util_1.promisify)(crypto_1.scrypt);
 let AuthService = class AuthService {
     prisma;
+    serverLogService;
     sessionTtlMs = 1000 * 60 * 60 * 24 * 30;
-    constructor(prisma) {
+    constructor(prisma, serverLogService) {
         this.prisma = prisma;
+        this.serverLogService = serverLogService;
     }
     async register(body) {
         try {
-            const email = this.normalizeEmail(body.email);
+            const username = this.normalizeUsername(body.username);
             const password = this.normalizePassword(body.password);
-            const displayName = this.normalizeDisplayName(body.display_name);
             const existing = await this.prisma.userCredential.findUnique({
-                where: { email },
+                where: { username },
                 select: { user_id: true },
             });
             if (existing) {
-                throw new common_1.ConflictException('Email is already registered.');
+                throw new common_1.ConflictException('Username is already registered.');
             }
             const passwordHash = await this.hashPassword(password);
             const created = await this.prisma.user.create({
                 data: {
-                    auth_provider_id: `local:${email}`,
+                    auth_provider_id: `local:${username}`,
                     status: client_1.UserStatus.onboarding,
                     profile: {
-                        create: {
-                            real_name: displayName || undefined,
-                        },
+                        create: {},
                     },
                     credential: {
                         create: {
-                            email,
+                            username,
                             password_hash: passwordHash,
                         },
                     },
@@ -57,6 +57,10 @@ let AuthService = class AuthService {
             });
             const session = await this.createSession(created.id);
             const me = await this.getMe(created.id);
+            await this.serverLogService.info('auth.register', 'user registered', {
+                user_id: created.id,
+                username,
+            });
             return {
                 session_token: session.token,
                 expires_at: session.expiresAt,
@@ -69,24 +73,28 @@ let AuthService = class AuthService {
     }
     async login(body) {
         try {
-            const email = this.normalizeEmail(body.email);
+            const username = this.normalizeUsername(body.username);
             const password = this.normalizePassword(body.password);
             const credential = await this.prisma.userCredential.findUnique({
-                where: { email },
+                where: { username },
                 select: {
                     user_id: true,
                     password_hash: true,
                 },
             });
             if (!credential) {
-                throw new common_1.UnauthorizedException('Invalid email or password.');
+                throw new common_1.UnauthorizedException('Invalid username or password.');
             }
             const valid = await this.verifyPassword(password, credential.password_hash);
             if (!valid) {
-                throw new common_1.UnauthorizedException('Invalid email or password.');
+                throw new common_1.UnauthorizedException('Invalid username or password.');
             }
             const session = await this.createSession(credential.user_id);
             const me = await this.getMe(credential.user_id);
+            await this.serverLogService.info('auth.login', 'user login success', {
+                user_id: credential.user_id,
+                username,
+            });
             return {
                 session_token: session.token,
                 expires_at: session.expiresAt,
@@ -107,13 +115,17 @@ let AuthService = class AuthService {
                     created_at: true,
                     credential: {
                         select: {
-                            email: true,
+                            username: true,
                         },
                     },
                     profile: {
                         select: {
                             real_name: true,
                             real_avatar: true,
+                            anonymous_name: true,
+                            anonymous_avatar: true,
+                            gender: true,
+                            age: true,
                             city: true,
                             is_wall_broken: true,
                         },
@@ -140,7 +152,7 @@ let AuthService = class AuthService {
             return {
                 user: {
                     id: user.id,
-                    email: user.credential.email,
+                    username: user.credential.username,
                     status: user.status,
                     created_at: user.created_at,
                 },
@@ -162,6 +174,9 @@ let AuthService = class AuthService {
                 data: {
                     revoked_at: new Date(),
                 },
+            });
+            await this.serverLogService.info('auth.logout', 'user logout', {
+                session_id: sessionId,
             });
             return {
                 status: 'ok',
@@ -190,7 +205,7 @@ let AuthService = class AuthService {
                             status: true,
                             credential: {
                                 select: {
-                                    email: true,
+                                    username: true,
                                 },
                             },
                         },
@@ -203,10 +218,16 @@ let AuthService = class AuthService {
                 !session.user.credential) {
                 return null;
             }
+            await this.prisma.authSession.update({
+                where: { id: session.id },
+                data: {
+                    last_seen_at: new Date(),
+                },
+            });
             return {
                 sessionId: session.id,
                 userId: session.user_id,
-                email: session.user.credential.email,
+                username: session.user.credential.username,
                 status: session.user.status,
             };
         }
@@ -222,6 +243,7 @@ let AuthService = class AuthService {
                 user_id: userId,
                 token_hash: this.hashToken(token),
                 expires_at: expiresAt,
+                last_seen_at: new Date(),
             },
         });
         return {
@@ -259,13 +281,16 @@ let AuthService = class AuthService {
         }
         return token;
     }
-    normalizeEmail(email) {
-        const normalized = email?.trim().toLowerCase();
+    normalizeUsername(username) {
+        const normalized = (username || '').trim().normalize('NFKC').toLowerCase();
         if (!normalized) {
-            throw new common_1.BadRequestException('email is required.');
+            throw new common_1.BadRequestException('username is required.');
         }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
-            throw new common_1.BadRequestException('email format is invalid.');
+        if (normalized.length < 2 || normalized.length > 24) {
+            throw new common_1.BadRequestException('username must be between 2 and 24 characters.');
+        }
+        if (!/^[\p{L}\p{N}_-]+$/u.test(normalized)) {
+            throw new common_1.BadRequestException('username can only contain letters, numbers, underscore, and hyphen.');
         }
         return normalized;
     }
@@ -274,17 +299,10 @@ let AuthService = class AuthService {
         if (!normalized) {
             throw new common_1.BadRequestException('password is required.');
         }
-        if (normalized.length < 8) {
-            throw new common_1.BadRequestException('password must be at least 8 characters.');
+        if (normalized.length < 6) {
+            throw new common_1.BadRequestException('password must be at least 6 characters.');
         }
         return normalized;
-    }
-    normalizeDisplayName(displayName) {
-        const normalized = displayName?.trim() || '';
-        if (!normalized) {
-            return '';
-        }
-        return normalized.slice(0, 48);
     }
     rethrowAuthInfraError(error) {
         if (error instanceof common_1.HttpException) {
@@ -304,6 +322,7 @@ let AuthService = class AuthService {
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        server_log_service_1.ServerLogService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

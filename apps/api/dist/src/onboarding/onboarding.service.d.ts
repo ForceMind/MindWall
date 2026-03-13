@@ -1,5 +1,8 @@
 import { AdminConfigService } from '../admin/admin-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiUsageService } from '../telemetry/ai-usage.service';
+import { PromptTemplateService } from '../telemetry/prompt-template.service';
+import { ServerLogService } from '../telemetry/server-log.service';
 interface StartSessionBody {
     auth_provider_id?: string;
     city?: string;
@@ -7,14 +10,48 @@ interface StartSessionBody {
 interface SendMessageBody {
     message?: string;
 }
+interface SaveBasicsBody {
+    gender?: string;
+    age?: number;
+}
+interface SaveCityBody {
+    city?: string;
+}
 export declare class OnboardingService {
     private readonly prisma;
     private readonly adminConfigService;
+    private readonly promptTemplateService;
+    private readonly aiUsageService;
+    private readonly serverLogService;
     private readonly logger;
     private readonly sessions;
     private readonly totalQuestions;
+    private readonly anonymousPrefix;
+    private readonly anonymousSuffix;
     private readonly fallbackQuestions;
-    constructor(prisma: PrismaService, adminConfigService: AdminConfigService);
+    constructor(prisma: PrismaService, adminConfigService: AdminConfigService, promptTemplateService: PromptTemplateService, aiUsageService: AiUsageService, serverLogService: ServerLogService);
+    saveBasicsForUser(userId: string, body: SaveBasicsBody): Promise<{
+        status: string;
+        message: string;
+        profile: {
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
+            city: string | null;
+        };
+    }>;
+    saveCityForUser(userId: string, body: SaveCityBody): Promise<{
+        status: string;
+        message: string;
+        profile: {
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
+            city: string | null;
+        };
+    }>;
     startSession(body: StartSessionBody): Promise<{
         status: string;
         session_id: `${string}-${string}-${string}-${string}-${string}`;
@@ -43,8 +80,8 @@ export declare class OnboardingService {
         status: string;
         user_id: string;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         onboarding_summary: string;
@@ -64,8 +101,8 @@ export declare class OnboardingService {
         status: string;
         user_id: string;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         onboarding_summary: string;
@@ -80,8 +117,14 @@ export declare class OnboardingService {
     private persistTags;
     private normalizeExtraction;
     private normalizeTag;
+    private refreshAnonymousIdentity;
     private fallbackTagExtraction;
     private renderTranscript;
+    private normalizeGender;
+    private normalizeAge;
+    private normalizeCity;
+    private buildAnonymousIdentity;
+    private buildAvatarDataUri;
     private attachEmbedding;
     private buildTagEmbedding;
     private buildDeterministicEmbedding;

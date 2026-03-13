@@ -7,6 +7,13 @@ interface StartSessionBody {
 interface SendMessageBody {
     message?: string;
 }
+interface SaveBasicsBody {
+    gender?: string;
+    age?: number;
+}
+interface SaveCityBody {
+    city?: string;
+}
 export declare class OnboardingController {
     private readonly onboardingService;
     constructor(onboardingService: OnboardingService);
@@ -26,6 +33,28 @@ export declare class OnboardingController {
         assistant_message: string;
         remaining_questions: number;
     }>;
+    saveMyProfile(user: SessionUser, body: SaveBasicsBody): Promise<{
+        status: string;
+        message: string;
+        profile: {
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
+            city: string | null;
+        };
+    }>;
+    saveMyCity(user: SessionUser, body: SaveCityBody): Promise<{
+        status: string;
+        message: string;
+        profile: {
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
+            city: string | null;
+        };
+    }>;
     sendMessage(sessionId: string, body: SendMessageBody): Promise<{
         status: string;
         session_id: string;
@@ -38,8 +67,8 @@ export declare class OnboardingController {
         status: string;
         user_id: string;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         onboarding_summary: string;
@@ -59,8 +88,8 @@ export declare class OnboardingController {
         status: string;
         user_id: string;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         onboarding_summary: string;

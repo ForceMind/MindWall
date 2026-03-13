@@ -1,34 +1,39 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { ServerLogService } from '../telemetry/server-log.service';
 import type { SessionUser } from './auth.types';
 interface RegisterBody {
-    email?: string;
+    username?: string;
     password?: string;
-    display_name?: string;
 }
 interface LoginBody {
-    email?: string;
+    username?: string;
     password?: string;
 }
 export declare class AuthService {
     private readonly prisma;
+    private readonly serverLogService;
     private readonly sessionTtlMs;
-    constructor(prisma: PrismaService);
+    constructor(prisma: PrismaService, serverLogService: ServerLogService);
     register(body: RegisterBody): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         session_token: string;
@@ -37,19 +42,23 @@ export declare class AuthService {
     login(body: LoginBody): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         session_token: string;
@@ -58,19 +67,23 @@ export declare class AuthService {
     getMe(userId: string): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
     }>;
@@ -83,9 +96,8 @@ export declare class AuthService {
     private verifyPassword;
     private hashToken;
     private extractBearerToken;
-    private normalizeEmail;
+    private normalizeUsername;
     private normalizePassword;
-    private normalizeDisplayName;
     private rethrowAuthInfraError;
 }
 export {};

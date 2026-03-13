@@ -3,7 +3,7 @@ import type { UserStatus } from '@prisma/client';
 export interface SessionUser {
     sessionId: string;
     userId: string;
-    email: string;
+    username: string;
     status: UserStatus;
 }
 export interface AuthenticatedRequest extends Request {

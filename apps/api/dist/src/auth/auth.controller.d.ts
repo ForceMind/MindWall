@@ -4,49 +4,56 @@ export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);
     register(body: {
-        email?: string;
+        username?: string;
         password?: string;
-        display_name?: string;
     }): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         session_token: string;
         expires_at: string;
     }>;
     login(body: {
-        email?: string;
+        username?: string;
         password?: string;
     }): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
         session_token: string;
@@ -55,19 +62,23 @@ export declare class AuthController {
     me(user: SessionUser): Promise<{
         user: {
             id: string;
-            email: string;
+            username: string;
             status: import("@prisma/client").$Enums.UserStatus;
             created_at: Date;
         };
         profile: {
             real_avatar: string | null;
             real_name: string | null;
+            anonymous_avatar: string | null;
+            anonymous_name: string | null;
+            gender: string | null;
+            age: number | null;
             city: string | null;
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            weight: number;
             tag_name: string;
+            weight: number;
             ai_justification: string;
         }[];
     }>;

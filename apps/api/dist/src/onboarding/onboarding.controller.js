@@ -28,6 +28,12 @@ let OnboardingController = class OnboardingController {
     async startMySession(user, body) {
         return this.onboardingService.startSessionForUser(user.userId, body);
     }
+    async saveMyProfile(user, body) {
+        return this.onboardingService.saveBasicsForUser(user.userId, body);
+    }
+    async saveMyCity(user, body) {
+        return this.onboardingService.saveCityForUser(user.userId, body);
+    }
     async sendMessage(sessionId, body) {
         return this.onboardingService.submitMessage(sessionId, body);
     }
@@ -52,6 +58,24 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], OnboardingController.prototype, "startMySession", null);
+__decorate([
+    (0, common_1.Post)('me/profile'),
+    (0, common_1.UseGuards)(auth_guard_1.SessionAuthGuard),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], OnboardingController.prototype, "saveMyProfile", null);
+__decorate([
+    (0, common_1.Post)('me/city'),
+    (0, common_1.UseGuards)(auth_guard_1.SessionAuthGuard),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], OnboardingController.prototype, "saveMyCity", null);
 __decorate([
     (0, common_1.Post)('sessions/:sessionId/messages'),
     __param(0, (0, common_1.Param)('sessionId')),

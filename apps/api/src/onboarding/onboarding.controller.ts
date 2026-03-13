@@ -13,6 +13,15 @@ interface SendMessageBody {
   message?: string;
 }
 
+interface SaveBasicsBody {
+  gender?: string;
+  age?: number;
+}
+
+interface SaveCityBody {
+  city?: string;
+}
+
 @Controller('onboarding')
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
@@ -29,6 +38,24 @@ export class OnboardingController {
     @Body() body: Omit<StartSessionBody, 'auth_provider_id'>,
   ) {
     return this.onboardingService.startSessionForUser(user.userId, body);
+  }
+
+  @Post('me/profile')
+  @UseGuards(SessionAuthGuard)
+  async saveMyProfile(
+    @CurrentUser() user: SessionUser,
+    @Body() body: SaveBasicsBody,
+  ) {
+    return this.onboardingService.saveBasicsForUser(user.userId, body);
+  }
+
+  @Post('me/city')
+  @UseGuards(SessionAuthGuard)
+  async saveMyCity(
+    @CurrentUser() user: SessionUser,
+    @Body() body: SaveCityBody,
+  ) {
+    return this.onboardingService.saveCityForUser(user.userId, body);
   }
 
   @Post('sessions/:sessionId/messages')

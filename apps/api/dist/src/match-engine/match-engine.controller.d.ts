@@ -36,6 +36,8 @@ export declare class MatchEngineController {
             counterpart: {
                 user_id: string;
                 city: string | null;
+                anonymous_name: string | null;
+                anonymous_avatar: string | null;
                 public_tags: {
                     tag_name: string;
                     weight: number;
@@ -55,6 +57,8 @@ export declare class MatchEngineController {
             counterpart: {
                 user_id: string;
                 city: string | null;
+                anonymous_name: string | null;
+                anonymous_avatar: string | null;
                 public_tags: {
                     tag_name: string;
                     weight: number;

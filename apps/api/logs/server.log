@@ -1,0 +1,2 @@
+{"ts":"2026-03-13T08:46:12.114Z","level":"INFO","event":"auth.logout","message":"user logout","metadata":{"session_id":"aa9b6f81-76bc-4a32-a1c8-3886e0de00c9"}}
+{"ts":"2026-03-13T08:46:37.340Z","level":"INFO","event":"auth.login","message":"user login success","metadata":{"user_id":"1831f8be-8d4d-4542-867b-21b5ad2ab877","username":"1234"}}

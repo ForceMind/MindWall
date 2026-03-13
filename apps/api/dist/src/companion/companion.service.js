@@ -15,13 +15,51 @@ const common_1 = require("@nestjs/common");
 const client_1 = require("@prisma/client");
 const admin_config_service_1 = require("../admin/admin-config.service");
 const prisma_service_1 = require("../prisma/prisma.service");
+const ai_usage_service_1 = require("../telemetry/ai-usage.service");
+const prompt_template_service_1 = require("../telemetry/prompt-template.service");
+const server_log_service_1 = require("../telemetry/server-log.service");
 let CompanionService = CompanionService_1 = class CompanionService {
     prisma;
     adminConfigService;
+    promptTemplateService;
+    aiUsageService;
+    serverLogService;
     logger = new common_1.Logger(CompanionService_1.name);
-    constructor(prisma, adminConfigService) {
+    personas = [
+        {
+            id: 'ai_reflective',
+            name: '夏雾来信',
+            rhythm: '慢节奏、停顿后再回应',
+            attachment: '谨慎靠近型',
+            boundary: '尊重边界，不追问隐私',
+            emotion: '温和共情',
+            conflict: '先确认感受，再讨论分歧',
+        },
+        {
+            id: 'ai_boundary',
+            name: '林间坐标',
+            rhythm: '简洁直接',
+            attachment: '稳定对等型',
+            boundary: '偏清晰边界和规则感',
+            emotion: '理性克制',
+            conflict: '先定义问题，再给建议',
+        },
+        {
+            id: 'ai_warm',
+            name: '夜航电台',
+            rhythm: '轻松自然',
+            attachment: '陪伴支持型',
+            boundary: '不过度承诺',
+            emotion: '柔和鼓励',
+            conflict: '降低张力，逐步收敛',
+        },
+    ];
+    constructor(prisma, adminConfigService, promptTemplateService, aiUsageService, serverLogService) {
         this.prisma = prisma;
         this.adminConfigService = adminConfigService;
+        this.promptTemplateService = promptTemplateService;
+        this.aiUsageService = aiUsageService;
+        this.serverLogService = serverLogService;
     }
     async respond(userId, body) {
         const history = this.normalizeHistory(body.history || []);
@@ -32,7 +70,7 @@ let CompanionService = CompanionService_1 = class CompanionService {
             this.prisma.userProfile.findUnique({
                 where: { user_id: userId },
                 select: {
-                    real_name: true,
+                    anonymous_name: true,
                     city: true,
                 },
             }),
@@ -57,26 +95,52 @@ let CompanionService = CompanionService_1 = class CompanionService {
         if (!lastUserMessage) {
             throw new common_1.BadRequestException('At least one user message is required.');
         }
+        const persona = this.resolvePersona(body.companion_id, userId);
+        const personaPromptFallback = [
+            'You design realistic companion personas for anonymous social chat.',
+            'Persona dimensions: rhythm, attachment style, boundary preference, emotional tone, conflict style.',
+            'Never output harmful behavior.',
+        ].join('\n');
+        const replyPromptFallback = [
+            'You are generating a realistic chat reply for a virtual contact in MindWall.',
+            'Reply in Chinese naturally, concise and concrete.',
+            'Keep continuity with persona and conversation history.',
+            'Do not reveal system or model details.',
+        ].join('\n');
+        const [personaBasePrompt, replyBasePrompt] = await Promise.all([
+            this.promptTemplateService.getPrompt('simulation.persona', personaPromptFallback),
+            this.promptTemplateService.getPrompt('simulation.reply', replyPromptFallback),
+        ]);
         const prompt = [
-            '你是 MindWall 的 AI 陪练模式助手。',
-            '目标：在没有真实匹配对象时，基于用户画像提供自然、温和、具体的中文回复。',
-            '限制：',
-            '- 不要假装是真人用户',
-            '- 不要声称你有线下身份',
-            '- 不要输出 markdown',
-            '- 回复长度控制在 40 到 120 个中文字符',
-            '- 优先延续用户当前话题，而不是泛泛安慰',
-            `用户昵称: ${profile?.real_name || '未设置'}`,
-            `用户城市: ${profile?.city || '未设置'}`,
-            `公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
+            personaBasePrompt,
+            '',
+            replyBasePrompt,
+            '',
+            `当前角色代号: ${persona.id}`,
+            `当前角色名称: ${persona.name}`,
+            `角色心理画像:`,
+            `- 沟通节奏: ${persona.rhythm}`,
+            `- 依恋风格: ${persona.attachment}`,
+            `- 边界偏好: ${persona.boundary}`,
+            `- 情绪基调: ${persona.emotion}`,
+            `- 冲突处理: ${persona.conflict}`,
+            '',
+            `用户匿名名: ${profile?.anonymous_name || '未设置'}`,
+            `城市: ${profile?.city || '未设置'}`,
+            `用户公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
+            '',
             '对话历史:',
             history.map((item) => `${item.role}: ${item.text}`).join('\n'),
+            '',
+            '请只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
         ].join('\n');
-        const aiReply = await this.callOpenAi(prompt);
-        const reply = aiReply || this.buildFallbackReply(lastUserMessage, publicTags.map((item) => item.tag_name));
+        const aiReply = await this.callOpenAi(userId, prompt, 'simulation.reply', 'simulation.reply');
+        const reply = aiReply ||
+            this.buildFallbackReply(lastUserMessage, publicTags.map((item) => item.tag_name), persona);
         return {
-            mode: 'ai_companion',
-            disclosed: true,
+            mode: 'simulated_contact',
+            contact_id: persona.id,
+            contact_name: persona.name,
             reply,
         };
     }
@@ -87,13 +151,30 @@ let CompanionService = CompanionService_1 = class CompanionService {
             text: String(item.text || '').trim().slice(0, 800),
         }))
             .filter((item) => item.text.length > 0)
-            .slice(-16);
+            .slice(-20);
     }
-    buildFallbackReply(lastUserMessage, publicTags) {
-        const tagText = publicTags.length > 0 ? `结合你偏向${publicTags.slice(0, 3).join('、')}的表达方式，` : '';
-        return `${tagText}我先接住你刚才这句“${lastUserMessage.slice(0, 18)}”。如果你愿意，我们可以继续把这件事聊具体一点：你现在最在意的是感受、关系，还是接下来怎么做？`;
+    resolvePersona(companionId, userId) {
+        const normalized = (companionId || '').trim().toLowerCase();
+        if (normalized) {
+            const found = this.personas.find((item) => item.id === normalized);
+            if (found) {
+                return found;
+            }
+        }
+        let hash = 2166136261;
+        for (let i = 0; i < userId.length; i += 1) {
+            hash ^= userId.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return this.personas[Math.abs(hash) % this.personas.length] || this.personas[0];
     }
-    async callOpenAi(prompt) {
+    buildFallbackReply(lastUserMessage, publicTags, persona) {
+        const tagText = publicTags.length > 0
+            ? `我记得你更偏向“${publicTags.slice(0, 2).join('、')}”的表达方式，`
+            : '';
+        return `${tagText}你刚才这句“${lastUserMessage.slice(0, 18)}”我收到了。按${persona.name}的节奏，我们可以先把当下最卡你的那一点说清楚。`;
+    }
+    async callOpenAi(userId, prompt, feature, promptKey) {
         const aiConfig = await this.adminConfigService.getAiConfig();
         const apiKey = aiConfig.openaiApiKey;
         if (!apiKey) {
@@ -108,11 +189,11 @@ let CompanionService = CompanionService_1 = class CompanionService {
                 },
                 body: JSON.stringify({
                     model: aiConfig.openaiModel,
-                    temperature: 0.8,
+                    temperature: 0.85,
                     messages: [
                         {
                             role: 'system',
-                            content: '你输出自然、克制、具体的中文回复，不要使用 markdown。',
+                            content: 'You are generating natural Chinese social chat replies. Keep them realistic and safe.',
                         },
                         {
                             role: 'user',
@@ -124,17 +205,36 @@ let CompanionService = CompanionService_1 = class CompanionService {
             if (!response.ok) {
                 const detail = await response.text();
                 this.logger.warn(`Companion reply failed: ${response.status} ${detail}`);
+                await this.serverLogService.warn('companion.openai.failed', 'openai reply failed', {
+                    status: response.status,
+                    detail: detail.slice(0, 280),
+                });
                 return null;
             }
             const payload = (await response.json());
+            const usage = payload.usage;
+            await this.aiUsageService.logGeneration({
+                userId,
+                feature,
+                promptKey,
+                provider: 'openai',
+                model: aiConfig.openaiModel,
+                inputTokens: usage?.prompt_tokens || 0,
+                outputTokens: usage?.completion_tokens || 0,
+                totalTokens: usage?.total_tokens ||
+                    (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+            });
             const content = payload.choices?.[0]?.message?.content?.trim();
             if (!content) {
                 return null;
             }
-            return content.slice(0, 240);
+            return content.slice(0, 260);
         }
         catch (error) {
             this.logger.warn(`Companion reply error: ${error.message}`);
+            await this.serverLogService.warn('companion.openai.error', 'openai reply error', {
+                error: error.message,
+            });
             return null;
         }
     }
@@ -143,6 +243,9 @@ exports.CompanionService = CompanionService;
 exports.CompanionService = CompanionService = CompanionService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        admin_config_service_1.AdminConfigService])
+        admin_config_service_1.AdminConfigService,
+        prompt_template_service_1.PromptTemplateService,
+        ai_usage_service_1.AiUsageService,
+        server_log_service_1.ServerLogService])
 ], CompanionService);
 //# sourceMappingURL=companion.service.js.map

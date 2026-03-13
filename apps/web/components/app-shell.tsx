@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 type AppShellProps = {
   title: string;
@@ -13,16 +13,11 @@ type AppShellProps = {
 };
 
 const tabs = [
-  { href: "/", label: "访谈" },
-  { href: "/matches", label: "匹配" },
-  { href: "/sandbox", label: "聊天" },
-  { href: "/companion", label: "陪练" },
+  { href: '/contacts', label: '联系人' },
+  { href: '/chat', label: '聊天' },
 ];
 
 function isActive(pathname: string, href: string) {
-  if (href === "/") {
-    return pathname === "/";
-  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -37,7 +32,7 @@ export function AppShell({
 
   return (
     <div className="mw-app-bg">
-      <div className="mw-device">
+      <div className="mw-container">
         <header className="mw-header">
           <div className="mw-header-top">
             <div>
@@ -59,10 +54,11 @@ export function AppShell({
               <Link
                 key={tab.href}
                 href={tab.href}
-                className={`flex h-12 items-center justify-center rounded-2xl text-sm font-medium transition ${
+                aria-current={active ? 'page' : undefined}
+                className={`flex h-11 items-center justify-center rounded-xl border text-sm font-medium transition ${
                   active
-                    ? "bg-zinc-950 text-white shadow-[0_8px_20px_rgba(15,23,42,0.18)]"
-                    : "border border-black/6 bg-white/85 text-zinc-600"
+                    ? 'border-zinc-950 bg-zinc-950 text-white'
+                    : 'border-zinc-200 bg-white text-zinc-700'
                 }`}
               >
                 {tab.label}
@@ -78,7 +74,7 @@ export function AppShell({
 export function AppLoadingScreen({ label }: { label: string }) {
   return (
     <div className="mw-app-bg">
-      <div className="mw-device">
+      <div className="mw-container">
         <div className="mw-centered">
           <div>
             <p className="mw-header-kicker">MindWall</p>
@@ -101,7 +97,7 @@ export function AuthShell({
 }) {
   return (
     <div className="mw-app-bg">
-      <div className="mw-device">
+      <div className="mw-container">
         <header className="mw-header">
           <p className="mw-header-kicker">MindWall</p>
           <h1 className="mw-header-title">{title}</h1>

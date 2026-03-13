@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   Logger,
@@ -8,6 +8,9 @@ import { UserTagType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AdminConfigService } from '../admin/admin-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiUsageService } from '../telemetry/ai-usage.service';
+import { PromptTemplateService } from '../telemetry/prompt-template.service';
+import { ServerLogService } from '../telemetry/server-log.service';
 
 interface StartSessionBody {
   auth_provider_id?: string;
@@ -16,6 +19,15 @@ interface StartSessionBody {
 
 interface SendMessageBody {
   message?: string;
+}
+
+interface SaveBasicsBody {
+  gender?: string;
+  age?: number;
+}
+
+interface SaveCityBody {
+  city?: string;
 }
 
 type TurnRole = 'assistant' | 'user';
@@ -51,18 +63,117 @@ export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
   private readonly sessions = new Map<string, OnboardingSession>();
   private readonly totalQuestions = 4;
+  private readonly anonymousPrefix = [
+    '雾岛',
+    '微澜',
+    '晚风',
+    '晨岚',
+    '星屿',
+    '松影',
+    '白砂',
+    '林深',
+    '海盐',
+    '青曜',
+  ];
+  private readonly anonymousSuffix = [
+    '旅人',
+    '听雨者',
+    '漫游者',
+    '回声者',
+    '拾光者',
+    '观察者',
+    '慢行客',
+    '远行者',
+    '摆渡人',
+    '栖木者',
+  ];
   private readonly fallbackQuestions = [
-    '当你感到被理解时，通常对方做了什么？',
-    '最近一次让你真正投入的事情是什么？为什么？',
-    '在亲密关系中，你最在意的边界和尊重是什么？',
-    '如果未来一年只能专注一个成长目标，你会选什么？',
-    '你希望别人首先看到你身上的哪一面？',
+    '在别人眼里你可能很平静，但你心里最常翻涌的东西是什么？',
+    '你最害怕亲密关系里哪一种误解？它为什么会刺痛你？',
+    '如果一个人真的想靠近你，他最需要尊重你的哪道边界？',
+    '在这个越来越喧闹的世界里，你最想守住自己哪一部分内心？',
+    '你最希望别人先理解你身上的哪一道伤口，或哪一束光？',
   ];
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly adminConfigService: AdminConfigService,
+    private readonly promptTemplateService: PromptTemplateService,
+    private readonly aiUsageService: AiUsageService,
+    private readonly serverLogService: ServerLogService,
   ) {}
+
+  async saveBasicsForUser(userId: string, body: SaveBasicsBody) {
+    const gender = this.normalizeGender(body.gender);
+    const age = this.normalizeAge(body.age);
+    const identity = this.buildAnonymousIdentity(`${userId}:${gender}:${age}`);
+
+    const profile = await this.prisma.userProfile.upsert({
+      where: { user_id: userId },
+      create: {
+        user_id: userId,
+        gender,
+        age,
+        anonymous_name: identity.name,
+        anonymous_avatar: identity.avatar,
+      },
+      update: {
+        gender,
+        age,
+        anonymous_name: identity.name,
+        anonymous_avatar: identity.avatar,
+      },
+      select: {
+        anonymous_name: true,
+        anonymous_avatar: true,
+        gender: true,
+        age: true,
+        city: true,
+      },
+    });
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: 'onboarding',
+      },
+    });
+
+    return {
+      status: 'ok',
+      message:
+        '基础资料已保存。系统会根据你的资料和后续回答，逐步修正匿名昵称、头像和匹配画像。',
+      profile,
+    };
+  }
+
+  async saveCityForUser(userId: string, body: SaveCityBody) {
+    const city = this.normalizeCity(body.city);
+
+    const profile = await this.prisma.userProfile.upsert({
+      where: { user_id: userId },
+      create: {
+        user_id: userId,
+        city,
+      },
+      update: {
+        city,
+      },
+      select: {
+        anonymous_name: true,
+        anonymous_avatar: true,
+        gender: true,
+        age: true,
+        city: true,
+      },
+    });
+
+    return {
+      status: 'ok',
+      message: '城市已保存。接下来你可以开始匹配和聊天。',
+      profile,
+    };
+  }
 
   async startSession(body: StartSessionBody) {
     const authProviderId =
@@ -140,7 +251,7 @@ export class OnboardingService {
       },
     });
 
-    const firstQuestion = await this.generateQuestion([], 0);
+    const firstQuestion = await this.generateQuestion([], 0, userId);
     const sessionId = randomUUID();
 
     this.sessions.set(sessionId, {
@@ -188,6 +299,7 @@ export class OnboardingService {
       const nextQuestion = await this.generateQuestion(
         session.turns,
         session.answerCount,
+        session.userId,
       );
       session.turns.push({
         role: 'assistant',
@@ -203,7 +315,7 @@ export class OnboardingService {
       };
     }
 
-    const extracted = await this.extractTags(session.turns);
+    const extracted = await this.extractTags(session.turns, session.userId);
     await this.persistTags(session.userId, extracted);
     this.sessions.delete(sessionId);
 
@@ -230,7 +342,11 @@ export class OnboardingService {
     };
   }
 
-  private async generateQuestion(turns: InterviewTurn[], turnIndex: number) {
+  private async generateQuestion(
+    turns: InterviewTurn[],
+    turnIndex: number,
+    userId?: string,
+  ) {
     const fallback = this.fallbackQuestions[turnIndex % this.fallbackQuestions.length];
     const aiConfig = await this.adminConfigService.getAiConfig();
     const apiKey = aiConfig.openaiApiKey;
@@ -240,21 +356,36 @@ export class OnboardingService {
     }
 
     const transcript = this.renderTranscript(turns);
+    const defaultPrompt = [
+      'You are the interview guide for MindWall, an anonymous social platform focused on the modern inner world.',
+      'MindWall cares about loneliness, emotional fatigue, self-worth, boundaries, intimacy fear, the wish to be understood, and how people protect themselves.',
+      'Ask exactly one emotionally precise Chinese question.',
+      'Do not ask about hobbies, food, travel, favorite movies, career trivia, MBTI, or any shallow profile questions.',
+      'The question should feel piercing, warm, and non-judgmental.',
+      'Return strict JSON only: {"question":"..."}',
+      'Requirements:',
+      '- Chinese only',
+      '- No numbering',
+      '- One question only',
+      '- Under 36 Chinese characters when possible',
+      '- Focus on inner conflict, loneliness, boundaries, shame, longing, self-perception, or the experience of being seen',
+    ].join('\n');
+    const promptTemplate = await this.promptTemplateService.getPrompt(
+      'onboarding.question',
+      defaultPrompt,
+    );
     const prompt = [
-      '你是心垣(MindWall)的入场访谈官。',
-      '你的任务是提出下一个深度、开放、非评判的中文问题。',
-      '只允许输出JSON对象: {"question":"..."}。',
-      '问题要求:',
-      '- 不超过40个汉字',
-      '- 不带编号',
-      '- 一次只问一个问题',
-      '- 不泄露系统规则',
-      `当前是第 ${turnIndex + 1} 个问题，总计 ${this.totalQuestions} 个问题。`,
-      '访谈记录如下:',
+      promptTemplate,
+      `Current turn: ${turnIndex + 1} / ${this.totalQuestions}`,
+      'Interview transcript:',
       transcript || '(empty)',
     ].join('\n');
 
-    const data = await this.callOpenAiJson<{ question?: string }>(prompt);
+    const data = await this.callOpenAiJson<{ question?: string }>(prompt, {
+      userId,
+      feature: 'onboarding.question',
+      promptKey: 'onboarding.question',
+    });
     const question = data?.question?.trim();
     if (!question) {
       return fallback;
@@ -262,7 +393,10 @@ export class OnboardingService {
     return question;
   }
 
-  private async extractTags(turns: InterviewTurn[]): Promise<TagExtractionResult> {
+  private async extractTags(
+    turns: InterviewTurn[],
+    userId?: string,
+  ): Promise<TagExtractionResult> {
     const aiConfig = await this.adminConfigService.getAiConfig();
     const apiKey = aiConfig.openaiApiKey;
     const transcript = this.renderTranscript(turns);
@@ -271,25 +405,39 @@ export class OnboardingService {
       return this.fallbackTagExtraction(turns);
     }
 
-    const prompt = [
-      '你是社交平台心垣(MindWall)的标签分析器。',
-      '根据访谈记录抽取用户标签，输出严格JSON，不要markdown代码块。',
-      '格式必须是:',
+    const defaultPrompt = [
+      'You are the tag analyst for MindWall.',
+      'Read the interview transcript and infer both public-visible tags and hidden system traits.',
+      'Public tags should describe the person in a way suitable for anonymous matching cards.',
+      'Hidden traits should describe safety, emotional stability, empathy, boundaries, conflict style, and harassment risk.',
+      'Return strict JSON only. No markdown.',
       '{',
-      '  "public_tags":[{"tag_name":"", "weight":0.0-1.0, "ai_justification":""}],',
-      '  "hidden_system_traits":[{"tag_name":"", "weight":0.0-10.0, "ai_justification":""}],',
-      '  "onboarding_summary":"一句话总结，最多60字"',
+      '  "public_tags": [{"tag_name":"", "weight":0.0, "ai_justification":""}],',
+      '  "hidden_system_traits": [{"tag_name":"", "weight":0.0, "ai_justification":""}],',
+      '  "onboarding_summary": ""',
       '}',
-      '规则:',
-      '- public_tags 给 4~8 个',
-      '- hidden_system_traits 给 5~10 个，必须包含 harassment_tendency',
-      '- ai_justification 简短具体',
-      '- 仅返回JSON',
-      '访谈记录:',
+      'Rules:',
+      '- 4 to 8 public tags',
+      '- 5 to 10 hidden traits',
+      '- hidden traits must include harassment_tendency',
+      '- public tags should be emotionally meaningful, not generic hobbies',
+      '- onboarding_summary should be one Chinese sentence, within 50 Chinese characters when possible',
+    ].join('\n');
+    const promptTemplate = await this.promptTemplateService.getPrompt(
+      'onboarding.tag_extraction',
+      defaultPrompt,
+    );
+    const prompt = [
+      promptTemplate,
+      'Interview transcript:',
       transcript,
     ].join('\n');
 
-    const data = await this.callOpenAiJson<TagExtractionResult>(prompt);
+    const data = await this.callOpenAiJson<TagExtractionResult>(prompt, {
+      userId,
+      feature: 'onboarding.tag_extraction',
+      promptKey: 'onboarding.tag_extraction',
+    });
     if (!data) {
       return this.fallbackTagExtraction(turns);
     }
@@ -298,10 +446,10 @@ export class OnboardingService {
 
   private async persistTags(userId: string, extracted: TagExtractionResult) {
     const publicTags = extracted.public_tags.map((tag) =>
-      this.normalizeTag(tag, 1, '真诚表达者', '基于访谈内容的公开画像标签。'),
+      this.normalizeTag(tag, 1, '自我觉察者', '基于访谈内容生成的公开画像标签。'),
     );
     const hiddenTags = extracted.hidden_system_traits.map((tag) =>
-      this.normalizeTag(tag, 10, 'emotional_stability', '基于访谈内容的系统内部画像。'),
+      this.normalizeTag(tag, 10, 'emotional_stability', '基于访谈内容生成的隐藏系统画像。'),
     );
 
     for (const tag of publicTags) {
@@ -331,7 +479,11 @@ export class OnboardingService {
         },
       });
 
-      await this.attachEmbedding(saved.id, `${saved.tag_name}\n${saved.ai_justification}`);
+      await this.attachEmbedding(
+        saved.id,
+        `${saved.tag_name}\n${saved.ai_justification}`,
+        userId,
+      );
     }
 
     for (const tag of hiddenTags) {
@@ -361,8 +513,14 @@ export class OnboardingService {
         },
       });
 
-      await this.attachEmbedding(saved.id, `${saved.tag_name}\n${saved.ai_justification}`);
+      await this.attachEmbedding(
+        saved.id,
+        `${saved.tag_name}\n${saved.ai_justification}`,
+        userId,
+      );
     }
+
+    await this.refreshAnonymousIdentity(userId, publicTags);
 
     await this.prisma.user.update({
       where: { id: userId },
@@ -378,7 +536,7 @@ export class OnboardingService {
 
     const publicTags = (input.public_tags || [])
       .map((tag) =>
-        this.normalizeTag(tag, 1, '真诚表达者', '基于访谈内容的公开画像标签。'),
+        this.normalizeTag(tag, 1, '自我觉察者', '基于访谈内容生成的公开画像标签。'),
       )
       .slice(0, 8);
     const hiddenTags = (input.hidden_system_traits || [])
@@ -387,7 +545,7 @@ export class OnboardingService {
           tag,
           10,
           'emotional_stability',
-          '基于访谈内容的系统内部画像。',
+          '基于访谈内容生成的隐藏系统画像。',
         ),
       )
       .slice(0, 10);
@@ -396,7 +554,7 @@ export class OnboardingService {
       hiddenTags.push({
         tag_name: 'harassment_tendency',
         weight: 1,
-        ai_justification: '默认低风险，等待更多行为信号校准。',
+        ai_justification: '默认处于低风险区间，后续会根据真实互动动态校准。',
       });
     }
 
@@ -432,6 +590,42 @@ export class OnboardingService {
     };
   }
 
+  private async refreshAnonymousIdentity(userId: string, publicTags: TagCandidate[]) {
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { user_id: userId },
+      select: {
+        gender: true,
+        age: true,
+      },
+    });
+
+    const seedParts = [
+      userId,
+      profile?.gender || 'unspecified',
+      String(profile?.age || ''),
+      publicTags
+        .slice(0, 3)
+        .map((item) => item.tag_name)
+        .join('|'),
+    ];
+    const identity = this.buildAnonymousIdentity(seedParts.join(':'));
+
+    await this.prisma.userProfile.upsert({
+      where: { user_id: userId },
+      create: {
+        user_id: userId,
+        gender: profile?.gender || undefined,
+        age: profile?.age || undefined,
+        anonymous_name: identity.name,
+        anonymous_avatar: identity.avatar,
+      },
+      update: {
+        anonymous_name: identity.name,
+        anonymous_avatar: identity.avatar,
+      },
+    });
+  }
+
   private fallbackTagExtraction(turns: InterviewTurn[]): TagExtractionResult {
     const userText = turns
       .filter((turn) => turn.role === 'user')
@@ -440,44 +634,60 @@ export class OnboardingService {
 
     const publicTags: TagCandidate[] = [
       {
-        tag_name: '真诚表达者',
-        weight: 0.86,
-        ai_justification: '回答内容完整且愿意表达真实感受。',
+        tag_name: '情绪诚实者',
+        weight: 0.88,
+        ai_justification: '回答里有较明确的自我暴露和真实情绪表达。',
       },
       {
-        tag_name: '关系边界清晰',
-        weight: 0.79,
-        ai_justification: '强调相处中的尊重与边界感。',
+        tag_name: '边界感清晰',
+        weight: 0.82,
+        ai_justification: '能主动提到尊重、分寸、安全感或关系边界。',
       },
     ];
 
-    if (/(ai|编程|代码|技术|产品)/.test(userText)) {
+    if (/(孤独|疲惫|压力|焦虑|失眠|内耗)/.test(userText)) {
       publicTags.push({
-        tag_name: '科技探索者',
-        weight: 0.83,
-        ai_justification: '经常关注技术与创造性问题。',
+        tag_name: '高敏观察者',
+        weight: 0.79,
+        ai_justification: '对内心波动和环境变化有较强感受力。',
       });
     }
-    if (/(独处|内向|安静|思考)/.test(userText)) {
+    if (/(理解|倾听|共鸣|被看见|被理解)/.test(userText)) {
       publicTags.push({
-        tag_name: '内省型',
+        tag_name: '渴望深度连接',
+        weight: 0.84,
+        ai_justification: '比起热闹，更在意被真正理解和回应。',
+      });
+    }
+    if (/(边界|尊重|安全|分寸|舒服)/.test(userText)) {
+      publicTags.push({
+        tag_name: '关系尺度敏锐',
+        weight: 0.8,
+        ai_justification: '会主动辨认关系中的安全感与侵犯感。',
+      });
+    }
+    if (/(成长|意义|改变|成为|自我)/.test(userText)) {
+      publicTags.push({
+        tag_name: '意义驱动者',
         weight: 0.76,
-        ai_justification: '偏好深入思考与安静交流。',
+        ai_justification: '会从成长、价值和人生方向理解关系。',
       });
     }
-    if (/(运动|旅行|户外)/.test(userText)) {
+    if (/(慢|信任|真诚|认真|稳定)/.test(userText)) {
       publicTags.push({
-        tag_name: '行动体验派',
-        weight: 0.74,
-        ai_justification: '重视生活体验与行动投入。',
+        tag_name: '慢热而认真',
+        weight: 0.77,
+        ai_justification: '更偏好稳一点、真一点的靠近方式。',
       });
     }
 
+    const fillerTags = ['慢热连接者', '自我觉察者', '低噪音沟通者', '真诚回应者'];
     while (publicTags.length < 4) {
+      const filler = fillerTags[publicTags.length % fillerTags.length] || '自我觉察者';
       publicTags.push({
-        tag_name: `温和沟通者${publicTags.length}`,
-        weight: 0.68,
-        ai_justification: '表达稳定，沟通语气友好。',
+        tag_name: filler,
+        weight: 0.7,
+        ai_justification: '在回答中表现出一定程度的稳定表达与自我观察。',
       });
     }
 
@@ -486,31 +696,31 @@ export class OnboardingService {
       hidden_system_traits: [
         {
           tag_name: 'emotional_stability',
-          weight: 7.2,
-          ai_justification: '整体情绪表达稳定，波动较小。',
+          weight: 7.3,
+          ai_justification: '整体表达稳定，情绪波动可感知但未失控。',
         },
         {
           tag_name: 'empathy',
-          weight: 7.6,
-          ai_justification: '能考虑他人感受并给出回应。',
+          weight: 7.8,
+          ai_justification: '对他人感受与关系氛围有较强感知。',
         },
         {
           tag_name: 'boundary_respect',
-          weight: 8.3,
-          ai_justification: '明显重视关系中的边界。',
+          weight: 8.4,
+          ai_justification: '对边界、分寸和安全感有明确意识。',
         },
         {
           tag_name: 'conflict_tolerance',
-          weight: 6.5,
-          ai_justification: '面对差异时具备一定包容能力。',
+          weight: 6.4,
+          ai_justification: '面对差异时具备一定承受能力，但仍需要安全感支撑。',
         },
         {
           tag_name: 'harassment_tendency',
           weight: 1,
-          ai_justification: '访谈阶段未观察到骚扰信号。',
+          ai_justification: '访谈阶段未观察到明显骚扰风险。',
         },
       ],
-      onboarding_summary: '表达真诚、边界感较强，适合进入安全沙盒匹配。',
+      onboarding_summary: '自我觉察较强，重视边界与被理解，适合进入低刺激、深表达的匿名匹配。',
     };
   }
 
@@ -520,8 +730,103 @@ export class OnboardingService {
       .join('\n');
   }
 
-  private async attachEmbedding(tagId: string, sourceText: string) {
-    const embedding = await this.buildTagEmbedding(sourceText);
+  private normalizeGender(gender?: string) {
+    const normalized = (gender || '').trim().toLowerCase();
+    if (!normalized) {
+      throw new BadRequestException('gender is required.');
+    }
+
+    const mapping: Record<string, string> = {
+      male: 'male',
+      man: 'male',
+      m: 'male',
+      男: 'male',
+      female: 'female',
+      woman: 'female',
+      f: 'female',
+      女: 'female',
+      nb: 'nonbinary',
+      nonbinary: 'nonbinary',
+      other: 'other',
+      其他: 'other',
+    };
+
+    return mapping[normalized] || 'other';
+  }
+
+  private normalizeAge(age?: number) {
+    const numeric = Number(age);
+    if (!Number.isFinite(numeric)) {
+      throw new BadRequestException('age is required.');
+    }
+
+    const normalized = Math.round(numeric);
+    if (normalized < 18 || normalized > 99) {
+      throw new BadRequestException('age must be between 18 and 99.');
+    }
+
+    return normalized;
+  }
+
+  private normalizeCity(city?: string) {
+    const normalized = city?.trim();
+    if (!normalized) {
+      throw new BadRequestException('city is required.');
+    }
+    return normalized.slice(0, 128);
+  }
+
+  private buildAnonymousIdentity(seedText: string) {
+    const seed = this.hashSeed(seedText);
+    const prefix =
+      this.anonymousPrefix[seed % this.anonymousPrefix.length] || '微澜';
+    const suffix =
+      this.anonymousSuffix[(seed >>> 3) % this.anonymousSuffix.length] ||
+      '旅人';
+    const serial = String(((seed >>> 7) % 89) + 11).padStart(2, '0');
+    const name = `${prefix}${suffix}${serial}`.slice(0, 64);
+
+    return {
+      name,
+      avatar: this.buildAvatarDataUri(seed, name),
+    };
+  }
+
+  private buildAvatarDataUri(seed: number, label: string) {
+    const palettes = [
+      ['#0f172a', '#1d4ed8', '#bfdbfe'],
+      ['#1f2937', '#059669', '#d1fae5'],
+      ['#312e81', '#f59e0b', '#fde68a'],
+      ['#3f3f46', '#e11d48', '#fecdd3'],
+      ['#111827', '#9333ea', '#e9d5ff'],
+      ['#172554', '#22c55e', '#dcfce7'],
+    ];
+    const palette = palettes[seed % palettes.length] || palettes[0];
+    const accentX = 28 + (seed % 44);
+    const accentY = 30 + ((seed >>> 5) % 40);
+    const ring = 18 + ((seed >>> 9) % 12);
+    const symbol = label.slice(0, 1).toUpperCase();
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${palette[0]}"/>
+            <stop offset="100%" stop-color="${palette[1]}"/>
+          </linearGradient>
+        </defs>
+        <rect width="160" height="160" rx="48" fill="url(#bg)"/>
+        <circle cx="${accentX}" cy="${accentY}" r="${ring}" fill="${palette[2]}" opacity="0.92"/>
+        <circle cx="112" cy="114" r="34" fill="#ffffff" opacity="0.16"/>
+        <circle cx="84" cy="62" r="18" fill="#ffffff" opacity="0.18"/>
+        <text x="80" y="94" text-anchor="middle" font-size="42" font-family="Arial, sans-serif" fill="#ffffff">${symbol}</text>
+      </svg>
+    `.replace(/\s+/g, ' ');
+
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+  }
+
+  private async attachEmbedding(tagId: string, sourceText: string, userId: string) {
+    const embedding = await this.buildTagEmbedding(sourceText, userId);
     const vectorLiteral = `[${embedding.map((value) => value.toFixed(6)).join(',')}]`;
 
     await this.prisma.$executeRawUnsafe(
@@ -529,7 +834,7 @@ export class OnboardingService {
     );
   }
 
-  private async buildTagEmbedding(text: string) {
+  private async buildTagEmbedding(text: string, userId?: string) {
     const aiConfig = await this.adminConfigService.getAiConfig();
     const apiKey = aiConfig.openaiApiKey;
     if (!apiKey) {
@@ -559,7 +864,22 @@ export class OnboardingService {
 
       const payload = (await response.json()) as {
         data?: Array<{ embedding?: number[] }>;
+        usage?: {
+          prompt_tokens?: number;
+          total_tokens?: number;
+        };
       };
+      const usage = payload.usage;
+      await this.aiUsageService.logGeneration({
+        userId,
+        feature: 'onboarding.embedding',
+        promptKey: 'onboarding.embedding',
+        provider: 'openai',
+        model,
+        inputTokens: usage?.prompt_tokens || usage?.total_tokens || 0,
+        outputTokens: 0,
+        totalTokens: usage?.total_tokens || usage?.prompt_tokens || 0,
+      });
       const vector = payload.data?.[0]?.embedding;
       if (!vector || vector.length !== 1536) {
         return this.buildDeterministicEmbedding(text);
@@ -602,7 +922,14 @@ export class OnboardingService {
     return hash >>> 0;
   }
 
-  private async callOpenAiJson<T>(prompt: string): Promise<T | null> {
+  private async callOpenAiJson<T>(
+    prompt: string,
+    options: {
+      userId?: string;
+      feature: string;
+      promptKey: string;
+    },
+  ): Promise<T | null> {
     const aiConfig = await this.adminConfigService.getAiConfig();
     const apiKey = aiConfig.openaiApiKey;
     if (!apiKey) {
@@ -625,7 +952,8 @@ export class OnboardingService {
           messages: [
             {
               role: 'system',
-              content: '你是高可靠JSON生成器。只输出JSON对象，不输出额外文本。',
+              content:
+                'You are a strict JSON generator. Output only one JSON object and nothing else.',
             },
             {
               role: 'user',
@@ -642,8 +970,26 @@ export class OnboardingService {
       }
 
       const payload = (await response.json()) as {
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
         choices?: Array<{ message?: { content?: string } }>;
       };
+      const usage = payload.usage;
+      await this.aiUsageService.logGeneration({
+        userId: options.userId,
+        feature: options.feature,
+        promptKey: options.promptKey,
+        provider: 'openai',
+        model,
+        inputTokens: usage?.prompt_tokens || 0,
+        outputTokens: usage?.completion_tokens || 0,
+        totalTokens:
+          usage?.total_tokens ||
+          (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+      });
       const content = payload.choices?.[0]?.message?.content?.trim();
       if (!content) {
         return null;
@@ -653,6 +999,14 @@ export class OnboardingService {
       return parsed as T;
     } catch (error) {
       this.logger.warn(`OpenAI call error: ${(error as Error).message}`);
+      await this.serverLogService.warn(
+        'onboarding.openai.error',
+        'openai call failed',
+        {
+          feature: options.feature,
+          error: (error as Error).message,
+        },
+      );
       return null;
     }
   }

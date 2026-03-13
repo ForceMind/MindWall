@@ -4,13 +4,15 @@ export declare class CompanionController {
     private readonly companionService;
     constructor(companionService: CompanionService);
     respond(user: SessionUser, body: {
+        companion_id?: string;
         history?: Array<{
             role?: string;
             text?: string;
         }>;
     }): Promise<{
         mode: string;
-        disclosed: boolean;
+        contact_id: string;
+        contact_name: string;
         reply: string;
     }>;
 }

@@ -1,11 +1,17 @@
-param(
+﻿param(
   [switch]$SkipInstall,
   [switch]$SkipMigrate,
   [switch]$NoDocker
 )
 
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "MindWall Local Start"
+try {
+  $rawUi = $Host.UI.RawUI
+  if ($rawUi) {
+    $rawUi.WindowTitle = "MindWall Local Start"
+  }
+} catch {
+}
 
 trap {
   Write-Host $_.Exception.Message -ForegroundColor Red
@@ -179,3 +185,4 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", $WebCommand | Out-
 Write-Host "Done:"
 Write-Host "- API: http://localhost:$ApiPort"
 Write-Host "- Web: http://localhost:$WebPort"
+

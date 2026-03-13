@@ -1,6 +1,9 @@
 import { AiAction, MatchStatus, Prisma } from '@prisma/client';
 import { AdminConfigService } from '../admin/admin-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiUsageService } from '../telemetry/ai-usage.service';
+import { PromptTemplateService } from '../telemetry/prompt-template.service';
+import { ServerLogService } from '../telemetry/server-log.service';
 interface ProcessMessageInput {
     matchId: string;
     senderId: string;
@@ -18,6 +21,8 @@ interface WallDecisionInput {
 }
 interface UserProfileBrief {
     userId: string;
+    anonymousName: string | null;
+    anonymousAvatar: string | null;
     realName: string | null;
     realAvatar: string | null;
 }
@@ -64,8 +69,11 @@ export interface WallDecisionResult {
 export declare class SandboxService {
     private readonly prisma;
     private readonly adminConfigService;
+    private readonly promptTemplateService;
+    private readonly aiUsageService;
+    private readonly serverLogService;
     private readonly logger;
-    constructor(prisma: PrismaService, adminConfigService: AdminConfigService);
+    constructor(prisma: PrismaService, adminConfigService: AdminConfigService, promptTemplateService: PromptTemplateService, aiUsageService: AiUsageService, serverLogService: ServerLogService);
     ensureUserExists(userId: string): Promise<boolean>;
     assertMatchParticipant(matchId: string, userId: string): Promise<{
         match_id: string;

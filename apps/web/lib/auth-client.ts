@@ -1,16 +1,20 @@
-import { apiBaseUrl } from "./config";
+﻿import { apiBaseUrl } from "./config";
 import { clearStoredToken, getAuthHeaders } from "./session";
 
 export type Viewer = {
   user: {
     id: string;
-    email: string;
+    username: string;
     status: string;
     created_at: string;
   };
   profile: {
     real_name: string | null;
     real_avatar: string | null;
+    anonymous_name: string | null;
+    anonymous_avatar: string | null;
+    gender: string | null;
+    age: number | null;
     city: string | null;
     is_wall_broken: boolean;
   } | null;
@@ -30,6 +34,7 @@ export async function fetchCurrentViewer() {
     clearStoredToken();
     return null;
   }
+
   if (!response.ok) {
     throw new Error(`获取当前登录状态失败：${response.status}`);
   }

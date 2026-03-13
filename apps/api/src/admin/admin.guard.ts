@@ -2,26 +2,22 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
-  UnauthorizedException,
 } from '@nestjs/common';
+import { AdminAuthService } from './admin-auth.service';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly adminAuthService: AdminAuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
+    const authorization = request.headers.authorization;
     const tokenHeader = request.headers['x-admin-token'];
-    const provided = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
-    const expected = process.env.ADMIN_TOKEN || '';
 
-    if (!expected) {
-      throw new UnauthorizedException(
-        'ADMIN_TOKEN is not configured on server.',
-      );
-    }
-
-    if (!provided || String(provided).trim() !== expected) {
-      throw new UnauthorizedException('Invalid admin token.');
-    }
+    request.adminAuth = await this.adminAuthService.authenticateAdminRequest({
+      authorization: Array.isArray(authorization) ? authorization[0] : authorization,
+      adminTokenHeader: Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader,
+    });
 
     return true;
   }
