@@ -227,5 +227,7 @@ export declare class AdminDashboardService {
     }>;
     private readUserLogs;
     private buildUserTimeline;
+    private formatMatchStatus;
+    private formatMessageAction;
     private safeParseJson;
 }

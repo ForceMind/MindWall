@@ -29,6 +29,7 @@ export declare class OnboardingService {
     private readonly anonymousPrefix;
     private readonly anonymousSuffix;
     private readonly fallbackQuestions;
+    private readonly interviewFocuses;
     constructor(prisma: PrismaService, adminConfigService: AdminConfigService, promptTemplateService: PromptTemplateService, aiUsageService: AiUsageService, serverLogService: ServerLogService);
     saveBasicsForUser(userId: string, body: SaveBasicsBody): Promise<{
         status: string;
@@ -120,6 +121,14 @@ export declare class OnboardingService {
     private refreshAnonymousIdentity;
     private fallbackTagExtraction;
     private renderTranscript;
+    private getPreviousAssistantQuestions;
+    private getLatestUserAnswer;
+    private pickFallbackQuestion;
+    private getInterviewFocus;
+    private buildAdaptiveFallbackQuestion;
+    private pickAnswerAnchor;
+    private isRepeatedQuestion;
+    private normalizeQuestionText;
     private normalizeGender;
     private normalizeAge;
     private normalizeCity;

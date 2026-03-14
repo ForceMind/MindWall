@@ -106,8 +106,151 @@ let AdminConfigService = AdminConfigService_1 = class AdminConfigService {
         }
         await this.writeRuntimeConfig(next);
         this.logger.log(`Runtime config updated: ${this.configFile}`);
-        await this.serverLogService.info('admin.config.update', 'runtime config updated', { updated_fields: Object.keys(input) });
+        await this.serverLogService.info('admin.config.update', 'runtime config updated', {
+            updated_fields: Object.keys(input),
+        });
         return this.getPublicConfig();
+    }
+    async testAiConnectivity(overrides) {
+        const current = await this.getAiConfig();
+        const ai = {
+            openaiBaseUrl: typeof overrides?.openai_base_url === 'string' &&
+                overrides.openai_base_url.trim()
+                ? this.normalizeBaseUrl(overrides.openai_base_url.trim())
+                : current.openaiBaseUrl,
+            openaiApiKey: typeof overrides?.openai_api_key === 'string'
+                ? overrides.openai_api_key.trim()
+                : current.openaiApiKey,
+            openaiModel: typeof overrides?.openai_model === 'string' &&
+                overrides.openai_model.trim()
+                ? overrides.openai_model.trim()
+                : current.openaiModel,
+            openaiEmbeddingModel: typeof overrides?.openai_embedding_model === 'string' &&
+                overrides.openai_embedding_model.trim()
+                ? overrides.openai_embedding_model.trim()
+                : current.openaiEmbeddingModel,
+        };
+        const result = {
+            ok: false,
+            message: '',
+            base_url: ai.openaiBaseUrl,
+            chat_model: ai.openaiModel,
+            embedding_model: ai.openaiEmbeddingModel,
+            chat: {
+                ok: false,
+                status: null,
+                latency_ms: null,
+                preview: '',
+                error: null,
+            },
+            embedding: {
+                ok: false,
+                status: null,
+                latency_ms: null,
+                vector_size: null,
+                error: null,
+            },
+        };
+        if (!ai.openaiApiKey) {
+            result.message = '未配置 API Key，请先在系统配置页保存后再测试。';
+            return result;
+        }
+        const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${ai.openaiApiKey}`,
+        };
+        const chatStartedAt = Date.now();
+        try {
+            const response = await fetch(`${ai.openaiBaseUrl}/chat/completions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    model: ai.openaiModel,
+                    temperature: 0,
+                    max_tokens: 16,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: '你是 MindWall 的接口连通性测试助手。',
+                        },
+                        {
+                            role: 'user',
+                            content: '请回复：连接正常',
+                        },
+                    ],
+                }),
+            });
+            result.chat.status = response.status;
+            result.chat.latency_ms = Date.now() - chatStartedAt;
+            if (!response.ok) {
+                const detail = await response.text();
+                result.chat.error = this.clipError(detail);
+            }
+            else {
+                const payload = (await response.json());
+                result.chat.ok = true;
+                result.chat.preview = (payload.choices?.[0]?.message?.content?.trim() || '接口已返回响应。').slice(0, 120);
+            }
+        }
+        catch (error) {
+            result.chat.latency_ms = Date.now() - chatStartedAt;
+            result.chat.error = this.clipError(error.message || String(error));
+        }
+        const embeddingStartedAt = Date.now();
+        try {
+            const response = await fetch(`${ai.openaiBaseUrl}/embeddings`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    model: ai.openaiEmbeddingModel,
+                    input: 'MindWall API connectivity check',
+                }),
+            });
+            result.embedding.status = response.status;
+            result.embedding.latency_ms = Date.now() - embeddingStartedAt;
+            if (!response.ok) {
+                const detail = await response.text();
+                result.embedding.error = this.clipError(detail);
+            }
+            else {
+                const payload = (await response.json());
+                const vector = payload.data?.[0]?.embedding;
+                if (!Array.isArray(vector)) {
+                    result.embedding.error = '向量接口返回成功，但响应中没有 embedding 数组。';
+                }
+                else {
+                    result.embedding.ok = true;
+                    result.embedding.vector_size = vector.length;
+                }
+            }
+        }
+        catch (error) {
+            result.embedding.latency_ms = Date.now() - embeddingStartedAt;
+            result.embedding.error = this.clipError(error.message || String(error));
+        }
+        result.ok = result.chat.ok && result.embedding.ok;
+        result.message = result.ok
+            ? '聊天接口与向量接口均可用。'
+            : '至少一个接口测试失败，请检查接口地址、API Key 与模型名称。';
+        if (result.ok) {
+            await this.serverLogService.info('admin.config.test', 'ai connectivity test passed', {
+                base_url: result.base_url,
+                chat_model: result.chat_model,
+                embedding_model: result.embedding_model,
+                chat_latency_ms: result.chat.latency_ms,
+                embedding_latency_ms: result.embedding.latency_ms,
+                has_override: Boolean(overrides && Object.keys(overrides).length > 0),
+            });
+        }
+        else {
+            await this.serverLogService.warn('admin.config.test', 'ai connectivity test failed', {
+                base_url: result.base_url,
+                chat_error: result.chat.error,
+                embedding_error: result.embedding.error,
+                has_override: Boolean(overrides && Object.keys(overrides).length > 0),
+            });
+        }
+        return result;
     }
     async ensureConfigFile() {
         await fs_1.promises.mkdir(this.configDir, { recursive: true });
@@ -146,6 +289,9 @@ let AdminConfigService = AdminConfigService_1 = class AdminConfigService {
             return this.defaultOpenAiBaseUrl;
         }
         return normalized.replace(/\/+$/, '');
+    }
+    clipError(raw) {
+        return (raw || '').replace(/\s+/g, ' ').trim().slice(0, 240);
     }
 };
 exports.AdminConfigService = AdminConfigService;

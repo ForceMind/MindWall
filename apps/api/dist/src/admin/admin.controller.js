@@ -43,6 +43,22 @@ let AdminController = class AdminController {
         }
         return this.adminConfigService.updateConfig(payload);
     }
+    async testConfig(body) {
+        const payload = {};
+        if (typeof body.openai_base_url === 'string') {
+            payload.openai_base_url = body.openai_base_url;
+        }
+        if (typeof body.openai_api_key === 'string') {
+            payload.openai_api_key = body.openai_api_key;
+        }
+        if (typeof body.openai_model === 'string') {
+            payload.openai_model = body.openai_model;
+        }
+        if (typeof body.openai_embedding_model === 'string') {
+            payload.openai_embedding_model = body.openai_embedding_model;
+        }
+        return this.adminConfigService.testAiConnectivity(payload);
+    }
 };
 exports.AdminController = AdminController;
 __decorate([
@@ -58,6 +74,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AdminController.prototype, "updateConfig", null);
+__decorate([
+    (0, common_1.Post)('config/test'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AdminController.prototype, "testConfig", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(admin_guard_1.AdminGuard),

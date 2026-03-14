@@ -1,2 +1,12 @@
 {"ts":"2026-03-13T08:46:12.114Z","level":"INFO","event":"auth.logout","message":"user logout","metadata":{"session_id":"aa9b6f81-76bc-4a32-a1c8-3886e0de00c9"}}
 {"ts":"2026-03-13T08:46:37.340Z","level":"INFO","event":"auth.login","message":"user login success","metadata":{"user_id":"1831f8be-8d4d-4542-867b-21b5ad2ab877","username":"1234"}}
+{"ts":"2026-03-13T08:49:11.733Z","level":"INFO","event":"admin.auth.login","message":"admin login success","metadata":{"username":"admin"}}
+{"ts":"2026-03-13T09:20:24.211Z","level":"INFO","event":"auth.login","message":"user login success","metadata":{"user_id":"1831f8be-8d4d-4542-867b-21b5ad2ab877","username":"1234"}}
+{"ts":"2026-03-13T09:21:05.198Z","level":"INFO","event":"admin.auth.login","message":"admin login success","metadata":{"username":"admin"}}
+{"ts":"2026-03-13T12:00:41.045Z","level":"INFO","event":"auth.login","message":"user login success","metadata":{"user_id":"1831f8be-8d4d-4542-867b-21b5ad2ab877","username":"1234"}}
+{"ts":"2026-03-13T12:01:08.896Z","level":"INFO","event":"admin.auth.login","message":"admin login success","metadata":{"username":"admin"}}
+{"ts":"2026-03-13T12:49:13.250Z","level":"INFO","event":"auth.logout","message":"user logout","metadata":{"session_id":"fe644864-eea8-451f-a013-b9d0212cbd09"}}
+{"ts":"2026-03-13T12:49:49.717Z","level":"INFO","event":"auth.register","message":"user registered","metadata":{"user_id":"f677ce38-63d9-48f8-94a5-1fd860b774c3","username":"请问23"}}
+{"ts":"2026-03-14T03:54:17.866Z","level":"INFO","event":"auth.logout","message":"user logout","metadata":{"session_id":"58d717b0-649a-41d3-ac9d-383c4ff11dd4"}}
+{"ts":"2026-03-14T06:23:58.649Z","level":"INFO","event":"auth.register","message":"user registered","metadata":{"user_id":"4ca5e202-3126-47f2-8833-2fd37a0e04ba","username":"12345"}}
+{"ts":"2026-03-14T06:25:26.232Z","level":"INFO","event":"admin.auth.login","message":"admin login success","metadata":{"username":"admin"}}

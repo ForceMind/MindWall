@@ -177,7 +177,7 @@ Write-Host "[6/6] Starting dev servers..."
 Assert-PortAvailable -Port $ApiPort -DisplayName "MindWall API"
 Assert-PortAvailable -Port $WebPort -DisplayName "MindWall Web"
 $ApiCommand = "Set-Location '$ApiDir'; `$env:PORT='$ApiPort'; npm run start:dev"
-$WebCommand = "Set-Location '$WebDir'; `$env:NEXT_PUBLIC_API_BASE_URL='http://localhost:$ApiPort'; `$env:NEXT_PUBLIC_WS_BASE_URL='ws://localhost:$ApiPort'; npm run dev -- -p $WebPort"
+$WebCommand = "Set-Location '$WebDir'; `$env:VITE_API_BASE_URL='http://localhost:$ApiPort'; `$env:VITE_WS_BASE_URL='ws://localhost:$ApiPort'; npm run dev -- --port $WebPort"
 
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $ApiCommand | Out-Null
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $WebCommand | Out-Null

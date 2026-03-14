@@ -115,7 +115,7 @@ if (Get-Command pm2 -ErrorAction SilentlyContinue) {
 
   pm2 describe mindwall-web | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    pm2 start npm --name mindwall-web --cwd $WebDir -- start -- -p $WebPort | Out-Null
+    pm2 start npm --name mindwall-web --cwd $WebDir -- start -- --host 0.0.0.0 --port $WebPort | Out-Null
   }
   pm2 restart mindwall-web --update-env | Out-Null
   pm2 save | Out-Null
@@ -124,5 +124,5 @@ if (Get-Command pm2 -ErrorAction SilentlyContinue) {
   Write-Host "pm2 not found. Code, migration and build are complete."
   Write-Host "Please restart services manually:"
   Write-Host "API: cd $ApiDir; npm run start:prod"
-  Write-Host "Web: cd $WebDir; npm start -- -p $WebPort"
+  Write-Host "Web: cd $WebDir; npm start -- --host 0.0.0.0 --port $WebPort"
 }

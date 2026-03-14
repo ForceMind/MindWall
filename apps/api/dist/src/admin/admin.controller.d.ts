@@ -36,4 +36,25 @@ export declare class AdminController {
         updated_at: string | null;
         config_file: string;
     }>;
+    testConfig(body: Record<string, unknown>): Promise<{
+        ok: boolean;
+        message: string;
+        base_url: string;
+        chat_model: string;
+        embedding_model: string;
+        chat: {
+            ok: boolean;
+            status: number | null;
+            latency_ms: number | null;
+            preview: string;
+            error: string | null;
+        };
+        embedding: {
+            ok: boolean;
+            status: number | null;
+            latency_ms: number | null;
+            vector_size: number | null;
+            error: string | null;
+        };
+    }>;
 }

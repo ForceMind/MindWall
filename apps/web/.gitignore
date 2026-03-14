@@ -13,9 +13,17 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# legacy next.js leftovers (do not commit)
+/_legacy_next_cache/
+/_legacy_next_app/
+/_legacy_next_components/
+/_legacy_next_lib/
+/next-env.d.ts.bak
+/next.config.ts.bak
+/eslint.config.mjs.bak
+
+# vite build output
+/dist/
 
 # production
 /build

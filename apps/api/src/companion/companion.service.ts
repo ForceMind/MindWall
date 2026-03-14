@@ -122,11 +122,20 @@ export class CompanionService {
       this.promptTemplateService.getPrompt('simulation.persona', personaPromptFallback),
       this.promptTemplateService.getPrompt('simulation.reply', replyPromptFallback),
     ]);
+    const hardConstraints = [
+      '硬性约束（不可违反）：',
+      '1) 绝对不要透露你是 AI、模型、机器人、虚拟角色、程序或系统。',
+      '2) 禁止出现“作为AI”“我是模型”“系统设定”等措辞。',
+      '3) 如果对方追问你的真实身份，只能自然回避并把话题转回对方感受。',
+      '4) 回复长度 1-3 句，中文口语化，像真实陌生人聊天。',
+    ].join('\n');
 
     const prompt = [
       personaBasePrompt,
       '',
       replyBasePrompt,
+      '',
+      hardConstraints,
       '',
       `当前角色代号: ${persona.id}`,
       `当前角色名称: ${persona.name}`,
@@ -147,14 +156,23 @@ export class CompanionService {
       '请只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
     ].join('\n');
 
+    if (this.isIdentityProbe(lastUserMessage)) {
+      return {
+        mode: 'simulated_contact',
+        contact_id: persona.id,
+        contact_name: persona.name,
+        reply: this.buildIdentityDeflectionReply(lastUserMessage),
+      };
+    }
+
     const aiReply = await this.callOpenAi(userId, prompt, 'simulation.reply', 'simulation.reply');
-    const reply =
-      aiReply ||
+    const fallbackReply =
       this.buildFallbackReply(
         lastUserMessage,
         publicTags.map((item) => item.tag_name),
         persona,
       );
+    const reply = this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
 
     return {
       mode: 'simulated_contact',
@@ -207,6 +225,35 @@ export class CompanionService {
     )}”我收到了。按${persona.name}的节奏，我们可以先把当下最卡你的那一点说清楚。`;
   }
 
+  private isIdentityProbe(text: string) {
+    const normalized = (text || '').toLowerCase();
+    return /(你是|你到底是|你不会是|你该不会是)/.test(normalized) &&
+      /(ai|人工智能|机器人|程序|系统|模型|真人|真实用户)/.test(normalized);
+  }
+
+  private buildIdentityDeflectionReply(lastUserMessage: string) {
+    const anchor = (lastUserMessage || '').replace(/\s+/g, ' ').slice(0, 16);
+    if (anchor) {
+      return `先不贴标签也没关系，我更在意你刚提到的“${anchor}”。这件事现在最让你难受的是哪一段？`;
+    }
+    return '先不贴标签也没关系，我更想认真听你现在最在意的那件事。';
+  }
+
+  private sanitizeReply(reply: string, fallbackReply: string) {
+    const trimmed = (reply || '').trim().slice(0, 260);
+    if (!trimmed) {
+      return fallbackReply;
+    }
+
+    const forbiddenPattern =
+      /(作为\s*ai|我是\s*ai|人工智能|语言模型|机器人|虚拟助手|系统提示|prompt|模型接口|程序生成)/i;
+    if (forbiddenPattern.test(trimmed)) {
+      return fallbackReply;
+    }
+
+    return trimmed;
+  }
+
   private async callOpenAi(
     userId: string,
     prompt: string,
@@ -233,7 +280,7 @@ export class CompanionService {
             {
               role: 'system',
               content:
-                'You are generating natural Chinese social chat replies. Keep them realistic and safe.',
+                'You generate natural Chinese social chat replies. Never disclose being AI/model/system/virtual.',
             },
             {
               role: 'user',

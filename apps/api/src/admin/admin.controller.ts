@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
@@ -40,5 +41,25 @@ export class AdminController {
     }
 
     return this.adminConfigService.updateConfig(payload);
+  }
+
+  @Post('config/test')
+  async testConfig(@Body() body: Record<string, unknown>) {
+    const payload: RuntimeConfig = {};
+
+    if (typeof body.openai_base_url === 'string') {
+      payload.openai_base_url = body.openai_base_url;
+    }
+    if (typeof body.openai_api_key === 'string') {
+      payload.openai_api_key = body.openai_api_key;
+    }
+    if (typeof body.openai_model === 'string') {
+      payload.openai_model = body.openai_model;
+    }
+    if (typeof body.openai_embedding_model === 'string') {
+      payload.openai_embedding_model = body.openai_embedding_model;
+    }
+
+    return this.adminConfigService.testAiConnectivity(payload);
   }
 }

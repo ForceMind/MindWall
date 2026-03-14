@@ -636,7 +636,7 @@ export class AdminDashboardService {
         ts: session.last_seen_at.toISOString(),
         type: 'auth.last_seen',
         title: '最近活跃',
-        detail: `会话 ${session.id.slice(0, 8)} 最近活跃更新。`,
+        detail: `会话 ${session.id.slice(0, 8)} 最近活跃时间已更新。`,
       });
 
       if (session.revoked_at) {
@@ -654,7 +654,7 @@ export class AdminDashboardService {
         ts: record.created_at.toISOString(),
         type: 'ai.generation',
         title: `AI 调用 · ${record.feature}`,
-        detail: `${record.model} · tokens ${record.total_tokens} · $${record.estimated_cost_usd.toFixed(6)}`,
+        detail: `${record.model} · 令牌 ${record.total_tokens} · $${record.estimated_cost_usd.toFixed(6)}`,
         meta: {
           prompt_key: record.prompt_key,
           input_tokens: record.input_tokens,
@@ -682,7 +682,7 @@ export class AdminDashboardService {
         ts: match.updated_at.toISOString(),
         type: 'match.updated',
         title: '匹配更新',
-        detail: `状态 ${match.status}，当前共振 ${match.resonance_score}。`,
+        detail: `状态 ${this.formatMatchStatus(match.status)}，当前共振 ${match.resonance_score}。`,
         meta: { match_id: match.id },
       });
 
@@ -709,8 +709,8 @@ export class AdminDashboardService {
       timeline.push({
         ts: message.created_at.toISOString(),
         type: `message.${message.ai_action}`,
-        title: `发送消息 · ${message.ai_action}`,
-        detail: `对 ${counterpartName} 发送消息：${message.ai_rewritten_text.slice(0, 60)}`,
+        title: `发送消息 · ${this.formatMessageAction(message.ai_action)}`,
+        detail: `向 ${counterpartName} 发送消息：${message.ai_rewritten_text.slice(0, 60)}`,
         meta: {
           match_id: message.match_id,
           message_id: message.id,
@@ -737,6 +737,34 @@ export class AdminDashboardService {
       .slice(0, 160);
   }
 
+  private formatMatchStatus(status: string) {
+    switch (status) {
+      case 'pending':
+        return '待确认';
+      case 'active_sandbox':
+        return '沙盒中';
+      case 'wall_broken':
+        return '已破壁';
+      case 'rejected':
+        return '已拒绝';
+      default:
+        return '未知';
+    }
+  }
+
+  private formatMessageAction(action: string) {
+    switch (action) {
+      case 'passed':
+        return '通过';
+      case 'modified':
+        return '改写';
+      case 'blocked':
+        return '拦截';
+      default:
+        return '未知';
+    }
+  }
+
   private safeParseJson(raw: string) {
     try {
       return JSON.parse(raw) as {
@@ -751,3 +779,4 @@ export class AdminDashboardService {
     }
   }
 }
+

@@ -59,6 +59,12 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         '在这个越来越喧闹的世界里，你最想守住自己哪一部分内心？',
         '你最希望别人先理解你身上的哪一道伤口，或哪一束光？',
     ];
+    interviewFocuses = [
+        '内在压力与长期情绪负担',
+        '关系里的边界与安全感',
+        '被误解时的痛点与防御方式',
+        '渴望被看见的真实部分',
+    ];
     constructor(prisma, adminConfigService, promptTemplateService, aiUsageService, serverLogService) {
         this.prisma = prisma;
         this.adminConfigService = adminConfigService;
@@ -261,7 +267,10 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         };
     }
     async generateQuestion(turns, turnIndex, userId) {
-        const fallback = this.fallbackQuestions[turnIndex % this.fallbackQuestions.length];
+        const previousQuestions = this.getPreviousAssistantQuestions(turns);
+        const latestUserAnswer = this.getLatestUserAnswer(turns);
+        const fallback = this.pickFallbackQuestion(turnIndex, previousQuestions, latestUserAnswer, userId);
+        const focus = this.getInterviewFocus(turnIndex);
         const aiConfig = await this.adminConfigService.getAiConfig();
         const apiKey = aiConfig.openaiApiKey;
         if (!apiKey) {
@@ -279,13 +288,31 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             '- Chinese only',
             '- No numbering',
             '- One question only',
-            '- Under 36 Chinese characters when possible',
+            '- 20-60 Chinese characters',
             '- Focus on inner conflict, loneliness, boundaries, shame, longing, self-perception, or the experience of being seen',
+            '- The next question must continue from the user latest answer, not restart a new topic',
+            '- Mention one concrete clue from latest user answer when possible',
+            '- Every turn must switch to a different psychological focus from previous turns',
+            '- Never repeat any previous question in wording or intent',
         ].join('\n');
         const promptTemplate = await this.promptTemplateService.getPrompt('onboarding.question', defaultPrompt);
+        const hardConstraints = [
+            'Hard constraints (must follow):',
+            '- Ask one question only',
+            '- Must continue from latest user answer',
+            '- Must not repeat previous questions',
+            '- Chinese only',
+        ].join('\n');
         const prompt = [
             promptTemplate,
+            hardConstraints,
             `Current turn: ${turnIndex + 1} / ${this.totalQuestions}`,
+            `Current focus: ${focus}`,
+            `Latest user answer: ${latestUserAnswer || '(none)'}`,
+            'Previous assistant questions:',
+            previousQuestions.length > 0
+                ? previousQuestions.map((item, index) => `${index + 1}. ${item}`).join('\n')
+                : '(none)',
             'Interview transcript:',
             transcript || '(empty)',
         ].join('\n');
@@ -293,9 +320,13 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             userId,
             feature: 'onboarding.question',
             promptKey: 'onboarding.question',
+            temperature: 0.78,
         });
         const question = data?.question?.trim();
         if (!question) {
+            return fallback;
+        }
+        if (this.isRepeatedQuestion(question, previousQuestions)) {
             return fallback;
         }
         return question;
@@ -335,6 +366,7 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             userId,
             feature: 'onboarding.tag_extraction',
             promptKey: 'onboarding.tag_extraction',
+            temperature: 0.25,
         });
         if (!data) {
             return this.fallbackTagExtraction(turns);
@@ -572,6 +604,94 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             .map((turn, index) => `${index + 1}. ${turn.role}: ${turn.content}`)
             .join('\n');
     }
+    getPreviousAssistantQuestions(turns) {
+        return turns
+            .filter((turn) => turn.role === 'assistant')
+            .map((turn) => turn.content.trim())
+            .filter((item) => Boolean(item));
+    }
+    getLatestUserAnswer(turns) {
+        const latest = [...turns]
+            .reverse()
+            .find((turn) => turn.role === 'user');
+        return latest?.content?.trim() || '';
+    }
+    pickFallbackQuestion(turnIndex, previousQuestions, latestUserAnswer, userSeedText) {
+        const history = new Set(previousQuestions.map((item) => this.normalizeQuestionText(item)));
+        const adaptive = this.buildAdaptiveFallbackQuestion(turnIndex, latestUserAnswer, previousQuestions);
+        if (adaptive) {
+            return adaptive;
+        }
+        const total = this.fallbackQuestions.length;
+        const baseOffset = userSeedText ? this.hashSeed(userSeedText) % total : 0;
+        for (let offset = 0; offset < total; offset += 1) {
+            const candidate = this.fallbackQuestions[(baseOffset + turnIndex + offset) % total];
+            if (!history.has(this.normalizeQuestionText(candidate))) {
+                return candidate;
+            }
+        }
+        return this.fallbackQuestions[(baseOffset + turnIndex) % total];
+    }
+    getInterviewFocus(turnIndex) {
+        return (this.interviewFocuses[turnIndex % this.interviewFocuses.length] ||
+            '内在冲突与关系边界');
+    }
+    buildAdaptiveFallbackQuestion(turnIndex, latestUserAnswer, previousQuestions) {
+        const anchor = this.pickAnswerAnchor(latestUserAnswer);
+        if (!anchor) {
+            return '';
+        }
+        const focusType = turnIndex % this.interviewFocuses.length;
+        const candidate = focusType === 0
+            ? `你刚提到“${anchor}”，它在你一天里最压得你喘不过气的时刻是什么？`
+            : focusType === 1
+                ? `关于“${anchor}”，你最希望对方先尊重你的哪条边界？`
+                : focusType === 2
+                    ? `当“${anchor}”被误解时，你通常会怎样保护自己？`
+                    : `围绕“${anchor}”，你最想被看见却最难说出口的感受是什么？`;
+        if (this.isRepeatedQuestion(candidate, previousQuestions)) {
+            return '';
+        }
+        return candidate;
+    }
+    pickAnswerAnchor(answer) {
+        const text = (answer || '')
+            .replace(/\s+/g, ' ')
+            .replace(/[。！？!?.,，；;：:]/g, '')
+            .trim();
+        if (!text) {
+            return '';
+        }
+        return text.slice(0, 14);
+    }
+    isRepeatedQuestion(candidate, previousQuestions) {
+        const normalizedCandidate = this.normalizeQuestionText(candidate);
+        if (!normalizedCandidate) {
+            return false;
+        }
+        for (const previous of previousQuestions) {
+            const normalizedPrevious = this.normalizeQuestionText(previous);
+            if (!normalizedPrevious) {
+                continue;
+            }
+            if (normalizedCandidate === normalizedPrevious) {
+                return true;
+            }
+            if (normalizedCandidate.length >= 8 &&
+                normalizedPrevious.length >= 8 &&
+                (normalizedCandidate.includes(normalizedPrevious) ||
+                    normalizedPrevious.includes(normalizedCandidate))) {
+                return true;
+            }
+        }
+        return false;
+    }
+    normalizeQuestionText(text) {
+        return (text || '')
+            .toLowerCase()
+            .replace(/[\s\p{P}\p{S}]+/gu, '')
+            .trim();
+    }
     normalizeGender(gender) {
         const normalized = (gender || '').trim().toLowerCase();
         if (!normalized) {
@@ -748,7 +868,7 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
                 },
                 body: JSON.stringify({
                     model,
-                    temperature: 0.4,
+                    temperature: options.temperature ?? 0.45,
                     response_format: { type: 'json_object' },
                     messages: [
                         {

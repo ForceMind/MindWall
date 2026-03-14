@@ -29,6 +29,9 @@ export declare class CompanionService {
     private normalizeHistory;
     private resolvePersona;
     private buildFallbackReply;
+    private isIdentityProbe;
+    private buildIdentityDeflectionReply;
+    private sanitizeReply;
     private callOpenAi;
 }
 export {};
