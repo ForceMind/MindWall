@@ -67,8 +67,8 @@ export declare class OnboardingController {
         status: string;
         user_id: string;
         public_tags: {
-            tag_name: string;
             weight: number;
+            tag_name: string;
             ai_justification: string;
         }[];
         onboarding_summary: string;
@@ -88,8 +88,8 @@ export declare class OnboardingController {
         status: string;
         user_id: string;
         public_tags: {
-            tag_name: string;
             weight: number;
+            tag_name: string;
             ai_justification: string;
         }[];
         onboarding_summary: string;

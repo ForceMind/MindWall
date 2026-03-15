@@ -21,8 +21,8 @@ const navItems = [
   { to: '/admin/online', label: '在线' },
   { to: '/admin/ai-records', label: 'AI记录' },
   { to: '/admin/prompts', label: '提示词' },
-  { to: '/admin/config', label: '系统配置' },
-  { to: '/admin/logs', label: '服务器日志' },
+  { to: '/admin/config', label: '配置' },
+  { to: '/admin/logs', label: '日志' },
 ];
 
 async function handleLogout() {
@@ -33,15 +33,19 @@ async function handleLogout() {
 
 <template>
   <div class="admin-layout">
-    <header class="screen" style="padding-bottom: 0">
+    <header class="admin-header-wrap">
       <section class="app-header">
         <div class="brand">
           <strong class="brand-title">{{ title }}</strong>
           <span class="brand-subtitle">{{ subtitle || 'MindWall 管理后台' }}</span>
         </div>
-        <button class="btn btn-ghost" type="button" style="padding: 6px 10px" @click="handleLogout">
-          退出后台
-        </button>
+
+        <div class="row-wrap">
+          <span class="badge badge-muted">{{ adminStore.session?.username || 'admin' }}</span>
+          <button class="btn btn-ghost" type="button" style="padding: 6px 10px" @click="handleLogout">
+            退出
+          </button>
+        </div>
       </section>
     </header>
 

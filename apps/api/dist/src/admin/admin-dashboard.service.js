@@ -475,7 +475,13 @@ let AdminDashboardService = class AdminDashboardService {
         return this.promptTemplateService.upsertPrompt(key, body);
     }
     async getServerLogs(lines) {
-        return this.serverLogService.tail(lines);
+        const tail = await this.serverLogService.tail(lines);
+        return {
+            file: tail.file,
+            available: true,
+            total_lines: tail.count,
+            lines: tail.lines,
+        };
     }
     async readUserLogs(userId, sessionIds) {
         const tail = await this.serverLogService.tail(1000);
@@ -537,7 +543,7 @@ let AdminDashboardService = class AdminDashboardService {
                 ts: record.created_at.toISOString(),
                 type: 'ai.generation',
                 title: `AI 调用 · ${record.feature}`,
-                detail: `${record.model} · 令牌 ${record.total_tokens} · $${record.estimated_cost_usd.toFixed(6)}`,
+                detail: `${record.model} · Token ${record.total_tokens} · $${record.estimated_cost_usd.toFixed(6)}`,
                 meta: {
                     prompt_key: record.prompt_key,
                     input_tokens: record.input_tokens,
@@ -548,19 +554,21 @@ let AdminDashboardService = class AdminDashboardService {
         for (const match of input.matches) {
             const counterpartId = match.user_a_id === input.userId ? match.user_b_id : match.user_a_id;
             const counterpart = input.counterpartMap.get(counterpartId);
-            const counterpartName = counterpart?.anonymous_name || counterpart?.username || counterpartId.slice(0, 8);
+            const counterpartName = counterpart?.anonymous_name ||
+                counterpart?.username ||
+                counterpartId.slice(0, 8);
             timeline.push({
                 ts: match.created_at.toISOString(),
                 type: 'match.created',
                 title: '建立匹配',
-                detail: `与 ${counterpartName} 建立匹配，初始共振 ${match.resonance_score}。`,
+                detail: `与 ${counterpartName} 建立匹配，初始共鸣值 ${match.resonance_score}。`,
                 meta: { match_id: match.id, status: match.status },
             });
             timeline.push({
                 ts: match.updated_at.toISOString(),
                 type: 'match.updated',
                 title: '匹配更新',
-                detail: `状态 ${this.formatMatchStatus(match.status)}，当前共振 ${match.resonance_score}。`,
+                detail: `状态：${this.formatMatchStatus(match.status)}，当前共鸣值 ${match.resonance_score}。`,
                 meta: { match_id: match.id },
             });
             if (match.wall_broken_at) {
@@ -568,7 +576,7 @@ let AdminDashboardService = class AdminDashboardService {
                     ts: match.wall_broken_at.toISOString(),
                     type: 'match.wall_broken',
                     title: '破壁完成',
-                    detail: `与 ${counterpartName} 已切换为直连聊天。`,
+                    detail: `与 ${counterpartName} 已切换为直接聊天。`,
                     meta: { match_id: match.id },
                 });
             }
@@ -578,7 +586,9 @@ let AdminDashboardService = class AdminDashboardService {
                 ? message.match.user_b_id
                 : message.match.user_a_id;
             const counterpart = input.counterpartMap.get(counterpartId);
-            const counterpartName = counterpart?.anonymous_name || counterpart?.username || counterpartId.slice(0, 8);
+            const counterpartName = counterpart?.anonymous_name ||
+                counterpart?.username ||
+                counterpartId.slice(0, 8);
             timeline.push({
                 ts: message.created_at.toISOString(),
                 type: `message.${message.ai_action}`,

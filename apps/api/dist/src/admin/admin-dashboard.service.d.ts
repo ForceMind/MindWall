@@ -79,28 +79,29 @@ export declare class AdminDashboardService {
         tags: {
             public: {
                 created_at: Date;
-                tag_name: string;
                 weight: number;
+                tag_name: string;
                 ai_justification: string;
             }[];
             hidden: {
                 created_at: Date;
-                tag_name: string;
                 weight: number;
+                tag_name: string;
                 ai_justification: string;
             }[];
         };
         recent: {
             sessions: {
                 is_active: boolean;
-                id: string;
                 created_at: Date;
+                id: string;
                 revoked_at: Date | null;
                 expires_at: Date;
                 last_seen_at: Date;
             }[];
             ai_records: {
                 estimated_cost_usd: number;
+                created_at: Date;
                 id: string;
                 feature: string;
                 prompt_key: string | null;
@@ -109,7 +110,6 @@ export declare class AdminDashboardService {
                 input_tokens: number;
                 output_tokens: number;
                 total_tokens: number;
-                created_at: Date;
             }[];
             matches: {
                 counterpart: {
@@ -118,12 +118,12 @@ export declare class AdminDashboardService {
                     anonymous_name: string | null;
                     city: string | null;
                 };
-                id: string;
                 created_at: Date;
                 updated_at: Date;
+                id: string;
                 status: import("@prisma/client").$Enums.MatchStatus;
-                user_b_id: string;
                 user_a_id: string;
+                user_b_id: string;
                 resonance_score: number;
                 ai_match_reason: string | null;
                 wall_broken_at: Date | null;
@@ -181,6 +181,8 @@ export declare class AdminDashboardService {
         total: number;
         records: {
             estimated_cost_usd: number;
+            user_id: string | null;
+            created_at: Date;
             id: string;
             feature: string;
             prompt_key: string | null;
@@ -190,11 +192,10 @@ export declare class AdminDashboardService {
             output_tokens: number;
             total_tokens: number;
             metadata: import("@prisma/client/runtime/client").JsonValue;
-            created_at: Date;
-            user_id: string | null;
         }[];
     }>;
     getPrompts(): Promise<{
+        updated_at: Date;
         id: string;
         name: string;
         key: string;
@@ -202,7 +203,6 @@ export declare class AdminDashboardService {
         content: string;
         version: number;
         is_active: boolean;
-        updated_at: Date;
     }[]>;
     updatePrompt(key: string, body: {
         name?: string;
@@ -210,20 +210,21 @@ export declare class AdminDashboardService {
         content?: string;
         is_active?: boolean;
     }): Promise<{
-        id: string;
         created_at: Date;
+        updated_at: Date;
+        id: string;
         name: string;
         key: string;
         category: string;
         content: string;
         version: number;
         is_active: boolean;
-        updated_at: Date;
     }>;
     getServerLogs(lines: number): Promise<{
         file: string;
+        available: boolean;
+        total_lines: number;
         lines: string[];
-        count: number;
     }>;
     private readUserLogs;
     private buildUserTimeline;

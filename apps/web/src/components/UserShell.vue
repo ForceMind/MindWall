@@ -23,6 +23,9 @@ const router = useRouter();
 const userStore = useUserSessionStore();
 
 const canLogout = computed(() => userStore.isAuthenticated);
+const userName = computed(
+  () => userStore.viewer?.profile?.anonymous_name || userStore.viewer?.user.username || '匿名用户',
+);
 
 function goBack() {
   if (props.backTo) {
@@ -57,15 +60,18 @@ async function handleLogout() {
         </div>
       </div>
 
-      <button
-        v-if="canLogout"
-        class="btn btn-ghost"
-        type="button"
-        style="padding: 6px 10px; border-radius: 10px"
-        @click="handleLogout"
-      >
-        退出
-      </button>
+      <div class="row-wrap" style="justify-content: flex-end">
+        <span class="badge badge-muted" v-if="canLogout">{{ userName }}</span>
+        <button
+          v-if="canLogout"
+          class="btn btn-ghost"
+          type="button"
+          style="padding: 6px 10px; border-radius: 10px"
+          @click="handleLogout"
+        >
+          退出
+        </button>
+      </div>
     </header>
 
     <slot />

@@ -10,3 +10,9 @@
 {"ts":"2026-03-14T03:54:17.866Z","level":"INFO","event":"auth.logout","message":"user logout","metadata":{"session_id":"58d717b0-649a-41d3-ac9d-383c4ff11dd4"}}
 {"ts":"2026-03-14T06:23:58.649Z","level":"INFO","event":"auth.register","message":"user registered","metadata":{"user_id":"4ca5e202-3126-47f2-8833-2fd37a0e04ba","username":"12345"}}
 {"ts":"2026-03-14T06:25:26.232Z","level":"INFO","event":"admin.auth.login","message":"admin login success","metadata":{"username":"admin"}}
+{"ts":"2026-03-15T13:48:47.694Z","level":"INFO","event":"auth.login","message":"user login success","metadata":{"user_id":"1831f8be-8d4d-4542-867b-21b5ad2ab877","username":"1234"}}
+{"ts":"2026-03-15T13:48:47.699Z","level":"INFO","event":"http.request","message":"request completed","metadata":{"request_id":"f2564537-97d0-4984-a9ba-afc0ea4b89fe","method":"POST","path":"/auth/login","duration_ms":510}}
+{"ts":"2026-03-15T13:48:47.906Z","level":"INFO","event":"http.request","message":"request completed","metadata":{"request_id":"cea23546-f366-4ac6-a2d3-df2ace73e099","method":"GET","path":"/contacts/me/list","duration_ms":33}}
+{"ts":"2026-03-15T13:48:47.930Z","level":"INFO","event":"http.request","message":"request completed","metadata":{"request_id":"c5d5efb3-724d-463e-8713-c1b5535d8390","method":"GET","path":"/contacts/me/candidates","duration_ms":55}}
+{"ts":"2026-03-15T13:48:55.569Z","level":"INFO","event":"http.request","message":"request completed","metadata":{"request_id":"8515e12c-ca4a-4d10-b2ad-d61fced59f50","method":"GET","path":"/sandbox/me/matches/9eed62d7-da3c-4cf8-964d-c5ed3b324c22/wall-state","duration_ms":16}}
+{"ts":"2026-03-15T13:48:55.569Z","level":"INFO","event":"http.request","message":"request completed","metadata":{"request_id":"227b1a37-5faa-4b47-82e9-7179fb8f56dd","method":"GET","path":"/sandbox/me/matches/9eed62d7-da3c-4cf8-964d-c5ed3b324c22/messages?limit=100","duration_ms":16}}

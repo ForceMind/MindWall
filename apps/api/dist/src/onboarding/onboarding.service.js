@@ -302,6 +302,9 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             '- Must continue from latest user answer',
             '- Must not repeat previous questions',
             '- Chinese only',
+            '- Must be open-ended and require narration',
+            '- Do NOT use yes/no style such as 是否、会不会、有没有、是不是、能不能',
+            '- Prefer prompts like 请具体描述 / 具体发生了什么 / 你如何理解',
         ].join('\n');
         const prompt = [
             promptTemplate,
@@ -326,7 +329,8 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         if (!question) {
             return fallback;
         }
-        if (this.isRepeatedQuestion(question, previousQuestions)) {
+        if (this.isRepeatedQuestion(question, previousQuestions) ||
+            this.isClosedEndedQuestion(question)) {
             return fallback;
         }
         return question;
@@ -643,13 +647,14 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         }
         const focusType = turnIndex % this.interviewFocuses.length;
         const candidate = focusType === 0
-            ? `你刚提到“${anchor}”，它在你一天里最压得你喘不过气的时刻是什么？`
+            ? `你刚提到“${anchor}”，请具体描述一个让你最难受的场景，当时发生了什么？`
             : focusType === 1
-                ? `关于“${anchor}”，你最希望对方先尊重你的哪条边界？`
+                ? `关于“${anchor}”，请具体说说你最需要被尊重的边界，以及越界会怎样影响你？`
                 : focusType === 2
-                    ? `当“${anchor}”被误解时，你通常会怎样保护自己？`
-                    : `围绕“${anchor}”，你最想被看见却最难说出口的感受是什么？`;
-        if (this.isRepeatedQuestion(candidate, previousQuestions)) {
+                    ? `当“${anchor}”被误解时，你通常会怎么应对？请举一个你经历过的片段。`
+                    : `围绕“${anchor}”，你最想被看见却最难说出口的感受是什么？请尽量具体。`;
+        if (this.isRepeatedQuestion(candidate, previousQuestions) ||
+            this.isClosedEndedQuestion(candidate)) {
             return '';
         }
         return candidate;
@@ -683,6 +688,35 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
                     normalizedPrevious.includes(normalizedCandidate))) {
                 return true;
             }
+        }
+        return false;
+    }
+    isClosedEndedQuestion(candidate) {
+        const compact = (candidate || '').replace(/\s+/g, '');
+        if (!compact) {
+            return true;
+        }
+        if (/^[是否会有嗯啊好可不行对错]+\??$/.test(compact)) {
+            return true;
+        }
+        const closedPatterns = [
+            /^你?是否/u,
+            /^你?会不会/u,
+            /^你?有没有/u,
+            /^你?是不是/u,
+            /^你?能不能/u,
+            /^会不会/u,
+            /^是不是/u,
+            /^有没有/u,
+            /^能不能/u,
+            /是否/u,
+            /会不会/u,
+            /有没有/u,
+            /是不是/u,
+            /能不能/u,
+        ];
+        if (closedPatterns.some((pattern) => pattern.test(compact))) {
+            return true;
         }
         return false;
     }

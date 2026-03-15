@@ -9,8 +9,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppService = void 0;
 const common_1 = require("@nestjs/common");
 let AppService = class AppService {
-    getHello() {
-        return 'Hello World!';
+    getServiceInfo() {
+        return {
+            name: 'MindWall API',
+            status: 'running',
+            version: process.env.npm_package_version || '0.0.1',
+            time: new Date().toISOString(),
+            endpoints: {
+                health: '/health',
+                auth: '/auth/*',
+                onboarding: '/onboarding/*',
+                contacts: '/contacts/*',
+                match_engine: '/match-engine/*',
+                sandbox: '/sandbox/*',
+                admin: '/admin/*',
+            },
+        };
     }
 };
 exports.AppService = AppService;

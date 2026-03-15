@@ -1,7 +1,10 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AdminConfigService } from './admin/admin-config.service';
 import { AppModule } from './app.module';
+import { GlobalHttpExceptionFilter } from './system/foundation/http/global-http-exception.filter';
+import { HttpLoggingInterceptor } from './system/foundation/http/http-logging.interceptor';
+import { requestContextMiddleware } from './system/foundation/http/request-context.middleware';
 
 function isLocalDevOrigin(origin: string) {
   try {
@@ -33,6 +36,12 @@ function isLocalDevOrigin(origin: string) {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(requestContextMiddleware);
+  app.useGlobalFilters(app.get(GlobalHttpExceptionFilter));
+  app.useGlobalInterceptors(app.get(HttpLoggingInterceptor));
+  app.enableShutdownHooks();
+
   const adminConfigService = app.get(AdminConfigService);
   const aiConfig = await adminConfigService.getAiConfig();
   const allowedOrigins = new Set(
@@ -65,6 +74,8 @@ async function bootstrap() {
     },
     credentials: true,
   });
+
   await app.listen(process.env.PORT ?? 3100);
 }
+
 bootstrap();

@@ -4,6 +4,9 @@ require("dotenv/config");
 const core_1 = require("@nestjs/core");
 const admin_config_service_1 = require("./admin/admin-config.service");
 const app_module_1 = require("./app.module");
+const global_http_exception_filter_1 = require("./system/foundation/http/global-http-exception.filter");
+const http_logging_interceptor_1 = require("./system/foundation/http/http-logging.interceptor");
+const request_context_middleware_1 = require("./system/foundation/http/request-context.middleware");
 function isLocalDevOrigin(origin) {
     try {
         const parsed = new URL(origin);
@@ -30,6 +33,10 @@ function isLocalDevOrigin(origin) {
 }
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    app.use(request_context_middleware_1.requestContextMiddleware);
+    app.useGlobalFilters(app.get(global_http_exception_filter_1.GlobalHttpExceptionFilter));
+    app.useGlobalInterceptors(app.get(http_logging_interceptor_1.HttpLoggingInterceptor));
+    app.enableShutdownHooks();
     const adminConfigService = app.get(admin_config_service_1.AdminConfigService);
     const aiConfig = await adminConfigService.getAiConfig();
     const allowedOrigins = new Set([

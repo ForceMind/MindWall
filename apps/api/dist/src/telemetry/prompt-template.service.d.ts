@@ -7,6 +7,7 @@ export declare class PromptTemplateService implements OnModuleInit {
     onModuleInit(): Promise<void>;
     getPrompt(key: string, fallback: string): Promise<string>;
     listPrompts(): Promise<{
+        updated_at: Date;
         id: string;
         name: string;
         key: string;
@@ -14,7 +15,6 @@ export declare class PromptTemplateService implements OnModuleInit {
         content: string;
         version: number;
         is_active: boolean;
-        updated_at: Date;
     }[]>;
     upsertPrompt(key: string, body: {
         name?: string;
@@ -22,14 +22,14 @@ export declare class PromptTemplateService implements OnModuleInit {
         content?: string;
         is_active?: boolean;
     }): Promise<{
-        id: string;
         created_at: Date;
+        updated_at: Date;
+        id: string;
         name: string;
         key: string;
         category: string;
         content: string;
         version: number;
         is_active: boolean;
-        updated_at: Date;
     }>;
 }

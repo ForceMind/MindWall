@@ -32,8 +32,8 @@ export declare class AuthService {
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            tag_name: string;
             weight: number;
+            tag_name: string;
             ai_justification: string;
         }[];
         session_token: string;
@@ -57,8 +57,8 @@ export declare class AuthService {
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            tag_name: string;
             weight: number;
+            tag_name: string;
             ai_justification: string;
         }[];
         session_token: string;
@@ -82,8 +82,8 @@ export declare class AuthService {
             is_wall_broken: boolean;
         } | null;
         public_tags: {
-            tag_name: string;
             weight: number;
+            tag_name: string;
             ai_justification: string;
         }[];
     }>;

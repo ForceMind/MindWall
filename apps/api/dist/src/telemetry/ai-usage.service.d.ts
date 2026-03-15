@@ -16,6 +16,8 @@ export declare class AiUsageService {
     private readonly pricingPer1K;
     constructor(prisma: PrismaService);
     logGeneration(input: UsageInput): Promise<{
+        user_id: string | null;
+        created_at: Date;
         id: string;
         feature: string;
         prompt_key: string | null;
@@ -26,8 +28,6 @@ export declare class AiUsageService {
         total_tokens: number;
         estimated_cost_usd: Prisma.Decimal;
         metadata: Prisma.JsonValue | null;
-        created_at: Date;
-        user_id: string | null;
     }>;
     getUsageOverview(): Promise<{
         total_records: number;
@@ -42,6 +42,8 @@ export declare class AiUsageService {
         total: number;
         records: {
             estimated_cost_usd: number;
+            user_id: string | null;
+            created_at: Date;
             id: string;
             feature: string;
             prompt_key: string | null;
@@ -51,8 +53,6 @@ export declare class AiUsageService {
             output_tokens: number;
             total_tokens: number;
             metadata: Prisma.JsonValue;
-            created_at: Date;
-            user_id: string | null;
         }[];
     }>;
     private estimateCost;
