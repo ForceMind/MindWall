@@ -26,6 +26,7 @@ MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
 BRANCH="${BRANCH:-main}"
 API_PORT="${API_PORT:-3100}"
 WEB_PORT="${WEB_PORT:-3001}"
+PUBLIC_HOST="${PUBLIC_HOST:-}"
 SKIP_GIT="${SKIP_GIT:-0}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"
 SKIP_MIGRATE="${SKIP_MIGRATE:-0}"
@@ -47,6 +48,7 @@ MindWall 更新脚本
   --branch <name>       Git 分支（默认 main）
   --api-port <port>     API 端口（默认读取 .mw-runtime/ports.env，否则 3100）
   --web-port <port>     Web 端口（默认读取 .mw-runtime/ports.env，否则 3001）
+  --public-host <host>  对外访问主机/IP（用于前端 API 地址）
   --skip-git            跳过 Git 拉取
   --skip-install        跳过 npm 安装
   --skip-migrate        跳过 Prisma migrate deploy
@@ -72,6 +74,11 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数值"; exit 1; }
       WEB_PORT="$2"
       WEB_PORT_SET=1
+      shift 2
+      ;;
+    --public-host)
+      [[ $# -ge 2 ]] || { echo "错误: --public-host 缺少参数值"; exit 1; }
+      PUBLIC_HOST="$2"
       shift 2
       ;;
     --skip-git)
@@ -244,6 +251,43 @@ set_or_append_env() {
 
 first_host_ip() {
   hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+is_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+is_private_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^10\. ]] && return 0
+  [[ "$ip" =~ ^192\.168\. ]] && return 0
+  [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] && return 0
+  return 1
+}
+
+resolve_public_host() {
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    echo "$PUBLIC_HOST"
+    return
+  fi
+
+  local detected=""
+  if have_command curl; then
+    detected="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+    if is_ipv4 "$detected"; then
+      echo "$detected"
+      return
+    fi
+  fi
+
+  detected="$(first_host_ip)"
+  if [[ -n "$detected" ]]; then
+    echo "$detected"
+    return
+  fi
+
+  echo "localhost"
 }
 
 ensure_runtime_files() {
@@ -463,7 +507,7 @@ ensure_rollup_optional_dependency() {
 
 write_app_env_ports() {
   local host
-  host="$(first_host_ip)"
+  host="$(resolve_public_host)"
   if [[ -z "$host" ]]; then
     host="localhost"
   fi
@@ -497,7 +541,7 @@ start_services() {
 
 print_summary() {
   local ip
-  ip="$(first_host_ip)"
+  ip="$(resolve_public_host)"
   if [[ -z "$ip" ]]; then
     ip="<服务器IP>"
   fi
@@ -507,6 +551,10 @@ print_summary() {
   echo "Web 端口: $WEB_PORT"
   echo "Web 地址: http://${ip}:${WEB_PORT}"
   echo "PM2_HOME: $PM2_HOME_DIR"
+  if is_ipv4 "$ip" && is_private_ipv4 "$ip"; then
+    echo "警告: 当前展示的是内网 IP（$ip），公网访问请设置 --public-host 或环境变量 PUBLIC_HOST。"
+  fi
+  echo "提示: 若公网仍无法访问，请检查云安全组/防火墙是否放行 $WEB_PORT（以及 $API_PORT）。"
 }
 
 main() {
@@ -533,6 +581,9 @@ main() {
     fi
     if [[ "$NO_DOCKER" == "1" ]]; then
       deploy_args+=("--no-docker")
+    fi
+    if [[ -n "$PUBLIC_HOST" ]]; then
+      deploy_args+=("--public-host" "$PUBLIC_HOST")
     fi
     as_root bash "$ROOT_DIR/deploy.sh" "${deploy_args[@]}"
   fi
