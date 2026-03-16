@@ -1,45 +1,50 @@
-# MindWall 服务器部署与更新（简版）
+# MindWall 服务器部署与更新（独立双脚本）
+
+## 核心说明
+
+- `deploy.sh`：首次部署（安装依赖、准备运行时、构建并启动）
+- `update.sh`：后续更新（拉代码、更新依赖、构建并重启）
+- 脚本使用 **项目内 Node 运行时**：`/root/MindWall/.mw-runtime/node`
+- 不再依赖系统全局 Node 版本，可满足 Prisma 对 Node `>=20.19.0` 的要求
+- PM2 使用独立目录：`/root/MindWall/.mw-runtime/pm2-home`，避免影响同机其他应用
 
 ## 1. 首次部署
-
-在项目根目录执行：
 
 ```bash
 cd /root/MindWall
 sudo chmod +x deploy.sh update.sh
-sudo bash deploy.sh
+sudo bash deploy.sh --yes
 ```
 
 可选参数：
 
 ```bash
-sudo bash deploy.sh --branch main --web-port 3001 --yes
+sudo bash deploy.sh --branch main --api-port 3100 --web-port 3001 --yes
 ```
 
 ## 2. 后续更新
 
 ```bash
 cd /root/MindWall
-sudo bash update.sh
+sudo bash update.sh --yes
 ```
 
 可选参数：
 
 ```bash
-sudo bash update.sh --branch main --web-port 3001 --yes
+sudo bash update.sh --branch main --skip-git --skip-install --skip-migrate --no-docker --yes
 ```
 
-## 3. 常见参数说明
+## 3. 端口冲突策略
 
-- `--skip-git`：跳过 Git 拉取，使用当前目录代码部署
-- `--skip-install`：更新时跳过 npm 依赖安装
-- `--skip-migrate`：更新时跳过 Prisma 迁移
-- `--no-docker`：跳过 PostgreSQL/Redis 容器启动
-- `--yes`：非交互模式（检测到本地改动时默认保留并跳过 git pull）
+- `deploy.sh` 首次部署会自动探测端口占用
+- 若 `--api-port` 或 `--web-port` 被占用，会自动顺延到可用端口
+- 最终端口会写入：`/root/MindWall/.mw-runtime/ports.env`
+- `update.sh` 默认复用该文件中的端口，保证更新后地址不乱跳
 
-## 4. 便捷命令（部署脚本会自动注册）
+## 4. 便捷命令
 
-首次执行 `deploy.sh` 后可使用：
+首次部署完成后会注册：
 
 ```bash
 mw-deploy

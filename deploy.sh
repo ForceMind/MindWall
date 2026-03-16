@@ -12,9 +12,20 @@ WEB_DIR="$ROOT_DIR/apps/web"
 COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
 VERSION_FILE="$ROOT_DIR/VERSION"
 
+RUNTIME_DIR="$ROOT_DIR/.mw-runtime"
+NODE_RUNTIME_DIR="$RUNTIME_DIR/node"
+NPM_GLOBAL_PREFIX="$RUNTIME_DIR/npm-global"
+PM2_HOME_DIR="$RUNTIME_DIR/pm2-home"
+RUNTIME_PORTS_FILE="$RUNTIME_DIR/ports.env"
+
+NODE_BIN="$NODE_RUNTIME_DIR/bin/node"
+NPM_BIN="$NODE_RUNTIME_DIR/bin/npm"
+PM2_BIN="$NPM_GLOBAL_PREFIX/bin/pm2"
+
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
 BRANCH="${BRANCH:-main}"
+API_PORT="${API_PORT:-3100}"
 WEB_PORT="${WEB_PORT:-3001}"
-TARGET_NODE_MAJOR="${TARGET_NODE_MAJOR:-20}"
 SKIP_GIT="${SKIP_GIT:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 YES="${YES:-0}"
@@ -25,29 +36,35 @@ OS_ID=""
 
 usage() {
   cat <<'EOF'
-MindWall 首次部署脚本
+MindWall deploy script (first-time setup)
 
-用法:
+Usage:
   sudo bash deploy.sh
 
-参数:
-  --branch <name>      指定分支，默认 main
-  --web-port <port>    Web 端口，默认 3001
-  --skip-git           跳过 git 拉取
-  --no-docker          跳过 Docker 启动
-  --yes                非交互模式
+Options:
+  --branch <name>       git branch (default: main)
+  --api-port <port>     api port (default: 3100)
+  --web-port <port>     web port (default: 3001)
+  --skip-git            skip git pull
+  --no-docker           skip docker start
+  --yes                 non-interactive mode
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
-      [[ $# -ge 2 ]] || { echo "错误: --branch 缺少参数"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "ERROR: --branch requires a value"; exit 1; }
       BRANCH="$2"
       shift 2
       ;;
+    --api-port)
+      [[ $# -ge 2 ]] || { echo "ERROR: --api-port requires a value"; exit 1; }
+      API_PORT="$2"
+      shift 2
+      ;;
     --web-port)
-      [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "ERROR: --web-port requires a value"; exit 1; }
       WEB_PORT="$2"
       shift 2
       ;;
@@ -68,7 +85,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "错误: 未识别参数 $1"
+      echo "ERROR: unknown option $1"
       usage
       exit 1
       ;;
@@ -88,15 +105,21 @@ as_root() {
 }
 
 die() {
-  echo "错误: $*" >&2
+  echo "ERROR: $*" >&2
   exit 1
 }
 
 warn() {
-  echo "警告: $*" >&2
+  echo "WARN: $*" >&2
 }
 
-get_version() {
+validate_port() {
+  local v="$1"
+  [[ "$v" =~ ^[0-9]+$ ]] || return 1
+  (( v >= 1 && v <= 65535 ))
+}
+
+project_version() {
   if [[ -f "$VERSION_FILE" ]]; then
     tr -d '[:space:]' < "$VERSION_FILE"
     return
@@ -113,12 +136,12 @@ require_root_capability() {
     SUDO="sudo"
     return
   fi
-  die "请使用 root 执行，或先安装 sudo。"
+  die "Please run as root (or install sudo)."
 }
 
 detect_os() {
   if [[ -f /etc/os-release ]]; then
-    local id_raw=""
+    local id_raw
     id_raw="$(grep -E '^ID=' /etc/os-release | cut -d= -f2- | tr -d '"' || true)"
     OS_ID="${id_raw,,}"
   fi
@@ -142,7 +165,7 @@ detect_pkg_manager() {
   elif have_command pacman; then
     PKG_MANAGER="pacman"
   else
-    die "未检测到支持的包管理器(apt/dnf/yum/zypper/pacman)。"
+    die "No supported package manager found (apt/dnf/yum/zypper/pacman)."
   fi
 }
 
@@ -179,36 +202,30 @@ install_packages() {
 }
 
 install_base_tools() {
-  echo "[1/10] 安装基础工具"
+  echo "[1/12] Installing base tools"
   refresh_pkg_index
   case "$PKG_MANAGER" in
     apt)
-      install_packages ca-certificates curl git tar xz-utils gnupg lsb-release
+      install_packages ca-certificates curl git tar xz-utils lsof
       ;;
     dnf|yum)
-      install_packages ca-certificates curl git tar xz
+      install_packages ca-certificates curl git tar xz lsof
       ;;
     zypper|pacman)
-      install_packages ca-certificates curl git tar xz
+      install_packages ca-certificates curl git tar xz lsof
       ;;
   esac
 }
 
 docker_engine_ready() {
-  if ! have_command docker; then
-    return 1
-  fi
-  as_root docker version >/dev/null 2>&1
+  have_command docker && as_root docker version >/dev/null 2>&1
 }
 
 docker_compose_available() {
   if have_command docker && as_root docker compose version >/dev/null 2>&1; then
     return 0
   fi
-  if have_command docker-compose; then
-    return 0
-  fi
-  return 1
+  have_command docker-compose
 }
 
 docker_compose_run() {
@@ -220,7 +237,7 @@ docker_compose_run() {
     as_root docker-compose -f "$COMPOSE_FILE" "$@"
     return
   fi
-  die "未检测到 Docker Compose。"
+  die "Docker Compose is not available."
 }
 
 ensure_docker_mirrors() {
@@ -228,7 +245,6 @@ ensure_docker_mirrors() {
   if [[ -f "$daemon_file" ]] && grep -q '"registry-mirrors"' "$daemon_file"; then
     return
   fi
-
   as_root mkdir -p /etc/docker
   local tmp_file
   tmp_file="$(mktemp)"
@@ -247,7 +263,7 @@ EOF
 }
 
 install_docker() {
-  echo "[2/10] 安装 Docker"
+  echo "[2/12] Installing docker"
   detect_pkg_manager
   detect_os
 
@@ -287,40 +303,51 @@ install_docker() {
     as_root systemctl restart docker || true
   fi
 
-  docker_engine_ready || die "Docker 引擎不可用。"
-  if ! docker_compose_available; then
-    die "Docker Compose 不可用。"
-  fi
+  docker_engine_ready || die "Docker engine is not ready."
+  docker_compose_available || die "Docker Compose is not ready."
 }
 
-node_major_installed() {
-  if ! have_command node; then
-    echo 0
-    return
-  fi
-  node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || echo 0
+version_ge() {
+  local a="$1"
+  local b="$2"
+  [[ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" == "$b" ]]
 }
 
-install_node_from_binary() {
-  local target_major="$1"
+node_version_of() {
+  local node_path="$1"
+  "$node_path" -v 2>/dev/null | sed 's/^v//'
+}
+
+prepare_runtime_dirs() {
+  mkdir -p "$RUNTIME_DIR" "$NPM_GLOBAL_PREFIX" "$PM2_HOME_DIR"
+}
+
+download_node_into_runtime() {
   local arch
   arch="$(uname -m)"
   case "$arch" in
     x86_64|amd64) arch="x64" ;;
     aarch64|arm64) arch="arm64" ;;
-    *) warn "不支持的 CPU 架构: $arch"; return 1 ;;
+    *) die "Unsupported CPU architecture: $arch" ;;
   esac
 
-  local versions=("20.18.3" "20.17.0")
-  local mirrors=("https://npmmirror.com/mirrors/node" "https://nodejs.org/dist")
+  local versions=(
+    "20.19.5"
+    "20.19.4"
+    "20.19.3"
+    "22.12.0"
+  )
+  local mirrors=(
+    "https://npmmirror.com/mirrors/node"
+    "https://nodejs.org/dist"
+  )
 
-  if [[ "$target_major" -lt 20 ]]; then
-    versions=("18.20.8" "18.20.7")
-  fi
+  rm -rf "$NODE_RUNTIME_DIR"
+  mkdir -p "$NODE_RUNTIME_DIR"
 
-  local tmpdir ok
+  local ok=0
+  local tmpdir
   tmpdir="$(mktemp -d)"
-  ok=0
 
   for ver in "${versions[@]}"; do
     local file
@@ -329,16 +356,7 @@ install_node_from_binary() {
       local url
       url="${mirror}/v${ver}/${file}"
       if curl -fsSL "$url" -o "${tmpdir}/node.tar.xz"; then
-        as_root mkdir -p /usr/local/nodejs
-        if as_root tar -xJf "${tmpdir}/node.tar.xz" -C /usr/local/nodejs; then
-          local install_dir
-          install_dir="/usr/local/nodejs/node-v${ver}-linux-${arch}"
-          as_root ln -sfn "${install_dir}/bin/node" /usr/local/bin/node
-          as_root ln -sfn "${install_dir}/bin/npm" /usr/local/bin/npm
-          as_root ln -sfn "${install_dir}/bin/npx" /usr/local/bin/npx
-          if [[ -x "${install_dir}/bin/corepack" ]]; then
-            as_root ln -sfn "${install_dir}/bin/corepack" /usr/local/bin/corepack
-          fi
+        if tar -xJf "${tmpdir}/node.tar.xz" -C "$NODE_RUNTIME_DIR" --strip-components=1; then
           ok=1
           break
         fi
@@ -349,97 +367,97 @@ install_node_from_binary() {
     fi
   done
   rm -rf "$tmpdir"
-  hash -r || true
-  [[ "$ok" -eq 1 ]]
+  [[ "$ok" -eq 1 ]] || die "Failed to install Node.js runtime into $NODE_RUNTIME_DIR"
 }
 
-install_nodejs() {
-  echo "[3/10] 安装 Node.js 与 npm"
-  detect_pkg_manager
+ensure_local_node_runtime() {
+  echo "[3/12] Preparing local Node.js runtime"
+  prepare_runtime_dirs
+  if [[ -x "$NODE_BIN" ]]; then
+    local current
+    current="$(node_version_of "$NODE_BIN" || true)"
+    if [[ -n "$current" ]] && version_ge "$current" "$MIN_NODE_VERSION"; then
+      echo "Local Node.js runtime: v$current"
+      return
+    fi
+  fi
 
-  if have_command node && have_command npm && [[ "$(node_major_installed)" -ge "$TARGET_NODE_MAJOR" ]]; then
-    echo "Node.js 已满足要求: $(node -v)"
+  echo "Installing local Node.js >= $MIN_NODE_VERSION into $NODE_RUNTIME_DIR"
+  download_node_into_runtime
+
+  local installed
+  installed="$(node_version_of "$NODE_BIN" || true)"
+  if [[ -z "$installed" ]] || ! version_ge "$installed" "$MIN_NODE_VERSION"; then
+    die "Node.js runtime version is too low (got v${installed:-unknown}, need >= $MIN_NODE_VERSION)"
+  fi
+  echo "Local Node.js installed: v$installed"
+}
+
+npm_cmd() {
+  PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NPM_BIN" "$@"
+}
+
+pm2_cmd() {
+  PATH="$NPM_GLOBAL_PREFIX/bin:$NODE_RUNTIME_DIR/bin:$PATH" PM2_HOME="$PM2_HOME_DIR" "$PM2_BIN" "$@"
+}
+
+ensure_local_pm2() {
+  echo "[4/12] Preparing local PM2 runtime"
+  if [[ -x "$PM2_BIN" ]]; then
     return
   fi
-
-  case "$PKG_MANAGER" in
-    apt|dnf|yum|zypper|pacman)
-      install_packages nodejs npm || install_packages nodejs || true
-      ;;
-  esac
-
-  if ! have_command node || ! have_command npm || [[ "$(node_major_installed)" -lt "$TARGET_NODE_MAJOR" ]]; then
-    echo "系统仓库版本不足，尝试安装官方 Node.js 二进制"
-    install_node_from_binary "$TARGET_NODE_MAJOR" || true
-  fi
-
-  have_command node || die "Node.js 安装失败。"
-  have_command npm || die "npm 安装失败。"
-
-  if [[ "$(node_major_installed)" -lt "$TARGET_NODE_MAJOR" ]]; then
-    warn "当前 Node.js 版本 $(node -v) 低于目标 v${TARGET_NODE_MAJOR}。"
-  fi
+  NPM_CONFIG_PREFIX="$NPM_GLOBAL_PREFIX" PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NPM_BIN" install -g pm2
+  [[ -x "$PM2_BIN" ]] || die "Failed to install local PM2."
 }
 
-install_pm2() {
-  echo "[4/10] 安装 pm2"
-  if have_command pm2; then
-    echo "pm2 已安装"
-    return
-  fi
-  if [[ "$(id -u)" -eq 0 ]]; then
-    npm install -g pm2
-  else
-    as_root npm install -g pm2 || npm install -g pm2
-  fi
-}
+register_shortcuts() {
+  echo "[5/12] Registering helper commands"
+  as_root chmod 755 "$ROOT_DIR/deploy.sh" "$ROOT_DIR/update.sh"
 
-register_commands() {
-  echo "[5/10] 注册 deploy/update 命令"
-  as_root chmod 755 "$ROOT_DIR/deploy.sh" "$ROOT_DIR/update.sh" "$ROOT_DIR/mw"
-
-  local wrap1 wrap2
-  wrap1="$(mktemp)"
-  wrap2="$(mktemp)"
-
-  cat > "$wrap1" <<EOF
+  local w1 w2
+  w1="$(mktemp)"
+  w2="$(mktemp)"
+  cat > "$w1" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 exec bash "$ROOT_DIR/deploy.sh" "\$@"
 EOF
-  cat > "$wrap2" <<EOF
+  cat > "$w2" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 exec bash "$ROOT_DIR/update.sh" "\$@"
 EOF
-
-  as_root install -m 755 "$wrap1" /usr/local/bin/mw-deploy
-  as_root install -m 755 "$wrap2" /usr/local/bin/mw-update
-  rm -f "$wrap1" "$wrap2"
+  as_root install -m 755 "$w1" /usr/local/bin/mw-deploy
+  as_root install -m 755 "$w2" /usr/local/bin/mw-update
+  rm -f "$w1" "$w2"
 }
 
 update_git_source() {
   if [[ "$SKIP_GIT" == "1" ]]; then
-    echo "已跳过 Git 拉取"
+    echo "Skip git pull."
     return
   fi
   if ! have_command git; then
-    warn "未检测到 git，跳过代码拉取。"
+    warn "git not found, skipping git pull."
     return
   fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn "当前目录不是 Git 仓库，跳过代码拉取。"
+    warn "Not a git repo, skipping git pull."
     return
   fi
   if ! git remote get-url origin >/dev/null 2>&1; then
-    warn "未配置 origin 远程仓库，跳过代码拉取。"
+    warn "origin remote not configured, skipping git pull."
     return
   fi
 
   local dirty
   dirty="$(git status --porcelain || true)"
   if [[ -n "$dirty" ]]; then
-    warn "检测到本地改动，首次部署保留本地文件并跳过 git pull。"
+    if [[ "$YES" == "1" ]]; then
+      warn "Local changes detected. --yes mode keeps changes and skips git pull."
+      return
+    fi
+    warn "Local changes detected. Keeping local changes and skipping git pull."
     return
   fi
 
@@ -475,6 +493,89 @@ ensure_runtime_files() {
   fi
 }
 
+port_in_use() {
+  local port="$1"
+  if have_command lsof; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+    return
+  fi
+  if have_command ss; then
+    ss -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"
+    return
+  fi
+  if have_command netstat; then
+    netstat -lnt 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+    return
+  fi
+  return 1
+}
+
+find_free_port() {
+  local base="$1"
+  local p="$base"
+  while port_in_use "$p"; do
+    p=$((p + 1))
+  done
+  echo "$p"
+}
+
+ensure_ports() {
+  echo "[6/12] Resolving ports"
+
+  local chosen_api chosen_web
+  chosen_api="$(find_free_port "$API_PORT")"
+  if [[ "$chosen_api" != "$API_PORT" ]]; then
+    warn "API port $API_PORT is occupied. Using $chosen_api instead."
+  fi
+
+  chosen_web="$(find_free_port "$WEB_PORT")"
+  if [[ "$chosen_web" != "$WEB_PORT" ]]; then
+    warn "Web port $WEB_PORT is occupied. Using $chosen_web instead."
+  fi
+
+  API_PORT="$chosen_api"
+  WEB_PORT="$chosen_web"
+
+  mkdir -p "$RUNTIME_DIR"
+  cat > "$RUNTIME_PORTS_FILE" <<EOF
+API_PORT=$API_PORT
+WEB_PORT=$WEB_PORT
+EOF
+}
+
+first_host_ip() {
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+set_or_append_env() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if grep -Eq "^${key}=" "$file"; then
+    sed -i "s#^${key}=.*#${key}=\"${value}\"#g" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$file"
+  fi
+}
+
+write_app_env_ports() {
+  echo "[7/12] Writing app env"
+  local host
+  host="$(first_host_ip)"
+  if [[ -z "$host" ]]; then
+    host="localhost"
+  fi
+  local api_env="$API_DIR/.env"
+  set_or_append_env "$api_env" "PORT" "$API_PORT"
+  set_or_append_env "$api_env" "WEB_ORIGIN" "http://${host}:${WEB_PORT}"
+  set_or_append_env "$api_env" "APP_VERSION" "$(project_version)"
+
+  cat > "$WEB_DIR/.env.production.local" <<EOF
+VITE_API_BASE_URL=http://${host}:${API_PORT}
+VITE_WS_BASE_URL=ws://${host}:${API_PORT}
+EOF
+}
+
 try_prepull_images() {
   as_root docker pull docker.m.daocloud.io/library/redis:7-alpine && \
     as_root docker tag docker.m.daocloud.io/library/redis:7-alpine redis:7-alpine || true
@@ -495,22 +596,22 @@ wait_for_container() {
     sleep 2
     waited=$((waited + 2))
   done
-  die "容器 $name 在 ${timeout}s 内未就绪。"
+  die "Container $name is not ready after ${timeout}s."
 }
 
 start_infra() {
   if [[ "$NO_DOCKER" == "1" ]]; then
-    echo "[6/10] 跳过 Docker 启动"
+    echo "[8/12] Skip docker startup"
     return
   fi
-  echo "[6/10] 启动 PostgreSQL + Redis"
+  echo "[8/12] Starting PostgreSQL + Redis"
   local ok=0
   for attempt in 1 2 3; do
     if docker_compose_run up -d; then
       ok=1
       break
     fi
-    warn "Docker 启动失败，第 ${attempt} 次重试。"
+    warn "Docker startup failed (attempt $attempt)."
     ensure_docker_mirrors
     if [[ "$attempt" -eq 1 ]]; then
       try_prepull_images
@@ -520,7 +621,7 @@ start_infra() {
     fi
     sleep $((attempt * 5))
   done
-  [[ "$ok" -eq 1 ]] || die "Docker 镜像拉取失败(redis/pgvector)。"
+  [[ "$ok" -eq 1 ]] || die "Failed to start Docker services (redis/pgvector image pull failed)."
   wait_for_container "mindwall-postgres" 180
   wait_for_container "mindwall-redis" 90
 }
@@ -529,57 +630,61 @@ npm_install_with_fallback() {
   local dir="$1"
   cd "$dir"
   if [[ -f package-lock.json ]]; then
-    if ! npm ci; then
-      warn "npm ci 失败，回退 npm install。"
-      npm install
+    if ! npm_cmd ci; then
+      warn "npm ci failed in $dir, fallback to npm install."
+      npm_cmd install
     fi
   else
-    npm install
+    npm_cmd install
   fi
 }
 
 install_project_deps() {
-  echo "[7/10] 安装 API/Web 依赖"
+  echo "[9/12] Installing API/Web dependencies"
   npm_install_with_fallback "$API_DIR"
   npm_install_with_fallback "$WEB_DIR"
 }
 
 run_prisma() {
-  echo "[8/10] 执行 Prisma 生成与迁移"
+  echo "[10/12] Running Prisma generate + deploy"
   cd "$API_DIR"
-  npm run prisma:generate
-  npm run prisma:deploy
+  npm_cmd run prisma:generate
+  npm_cmd run prisma:deploy
 }
 
 build_project() {
-  echo "[9/10] 构建 API/Web"
+  echo "[11/12] Building API/Web"
   cd "$API_DIR"
-  npm run build
+  npm_cmd run build
   cd "$WEB_DIR"
-  npm run build
+  npm_cmd run build
 }
 
 start_services() {
-  echo "[10/10] 启动 PM2 服务"
-  pm2 describe mindwall-api >/dev/null 2>&1 || \
-    pm2 start npm --name mindwall-api --cwd "$API_DIR" -- run start:prod
-  pm2 restart mindwall-api --update-env
+  echo "[12/12] Starting PM2 services (isolated PM2_HOME)"
+  pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
+    pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
+  pm2_cmd restart mindwall-api --update-env
 
-  pm2 describe mindwall-web >/dev/null 2>&1 || \
-    pm2 start npm --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
-  pm2 restart mindwall-web --update-env
-  pm2 save
+  pm2_cmd describe mindwall-web >/dev/null 2>&1 || \
+    pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
+  pm2_cmd restart mindwall-web --update-env
+  pm2_cmd save
 }
 
 print_summary() {
   local ip
-  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  ip="${ip:-<服务器IP>}"
-
+  ip="$(first_host_ip)"
+  if [[ -z "$ip" ]]; then
+    ip="<server-ip>"
+  fi
   echo
-  echo "部署完成，版本: v$(get_version)"
-  echo "Web: http://${ip}:${WEB_PORT}"
-  echo "更新命令: mw-update 或 sudo bash update.sh"
+  echo "Deploy complete: MindWall v$(project_version)"
+  echo "API port: $API_PORT"
+  echo "Web port: $WEB_PORT"
+  echo "Web URL:  http://${ip}:${WEB_PORT}"
+  echo "PM2_HOME: $PM2_HOME_DIR"
+  echo "Local Node: $NODE_RUNTIME_DIR"
 }
 
 main() {
@@ -587,20 +692,26 @@ main() {
   detect_os
   detect_pkg_manager
 
-  echo "MindWall 首次部署 v$(get_version)"
-  echo "目录: $ROOT_DIR"
+  validate_port "$API_PORT" || die "Invalid api port: $API_PORT"
+  validate_port "$WEB_PORT" || die "Invalid web port: $WEB_PORT"
+
+  cd "$ROOT_DIR"
+  echo "MindWall deploy v$(project_version)"
+  echo "Root: $ROOT_DIR"
 
   install_base_tools
   if [[ "$NO_DOCKER" != "1" ]]; then
     install_docker
   else
-    echo "[2/10] 跳过 Docker 安装"
+    echo "[2/12] Skip docker install"
   fi
-  install_nodejs
-  install_pm2
-  register_commands
+  ensure_local_node_runtime
+  ensure_local_pm2
+  register_shortcuts
   update_git_source
   ensure_runtime_files
+  ensure_ports
+  write_app_env_ports
   start_infra
   install_project_deps
   run_prisma

@@ -12,44 +12,66 @@ WEB_DIR="$ROOT_DIR/apps/web"
 COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
 VERSION_FILE="$ROOT_DIR/VERSION"
 
+RUNTIME_DIR="$ROOT_DIR/.mw-runtime"
+NODE_RUNTIME_DIR="$RUNTIME_DIR/node"
+NPM_GLOBAL_PREFIX="$RUNTIME_DIR/npm-global"
+PM2_HOME_DIR="$RUNTIME_DIR/pm2-home"
+RUNTIME_PORTS_FILE="$RUNTIME_DIR/ports.env"
+
+NODE_BIN="$NODE_RUNTIME_DIR/bin/node"
+NPM_BIN="$NODE_RUNTIME_DIR/bin/npm"
+PM2_BIN="$NPM_GLOBAL_PREFIX/bin/pm2"
+
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
 BRANCH="${BRANCH:-main}"
+API_PORT="${API_PORT:-3100}"
 WEB_PORT="${WEB_PORT:-3001}"
 SKIP_GIT="${SKIP_GIT:-0}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"
 SKIP_MIGRATE="${SKIP_MIGRATE:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 YES="${YES:-0}"
+API_PORT_SET=0
+WEB_PORT_SET=0
 
 SUDO=""
 
 usage() {
   cat <<'EOF'
-MindWall 更新脚本
+MindWall update script
 
-用法:
+Usage:
   sudo bash update.sh
 
-参数:
-  --branch <name>      指定分支，默认 main
-  --web-port <port>    Web 端口，默认 3001
-  --skip-git           跳过 git 拉取
-  --skip-install       跳过 npm 依赖安装
-  --skip-migrate       跳过 Prisma migrate deploy
-  --no-docker          跳过 Docker 启动
-  --yes                非交互模式(保留本地改动并跳过 git pull)
+Options:
+  --branch <name>       git branch (default: main)
+  --api-port <port>     api port (default: read from .mw-runtime/ports.env or 3100)
+  --web-port <port>     web port (default: read from .mw-runtime/ports.env or 3001)
+  --skip-git            skip git pull
+  --skip-install        skip npm install
+  --skip-migrate        skip prisma migrate deploy
+  --no-docker           skip docker startup
+  --yes                 non-interactive mode (keep local changes)
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
-      [[ $# -ge 2 ]] || { echo "错误: --branch 缺少参数"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "ERROR: --branch requires a value"; exit 1; }
       BRANCH="$2"
       shift 2
       ;;
+    --api-port)
+      [[ $# -ge 2 ]] || { echo "ERROR: --api-port requires a value"; exit 1; }
+      API_PORT="$2"
+      API_PORT_SET=1
+      shift 2
+      ;;
     --web-port)
-      [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "ERROR: --web-port requires a value"; exit 1; }
       WEB_PORT="$2"
+      WEB_PORT_SET=1
       shift 2
       ;;
     --skip-git)
@@ -77,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "错误: 未识别参数 $1"
+      echo "ERROR: unknown option $1"
       usage
       exit 1
       ;;
@@ -97,15 +119,21 @@ as_root() {
 }
 
 die() {
-  echo "错误: $*" >&2
+  echo "ERROR: $*" >&2
   exit 1
 }
 
 warn() {
-  echo "警告: $*" >&2
+  echo "WARN: $*" >&2
 }
 
-get_version() {
+validate_port() {
+  local v="$1"
+  [[ "$v" =~ ^[0-9]+$ ]] || return 1
+  (( v >= 1 && v <= 65535 ))
+}
+
+project_version() {
   if [[ -f "$VERSION_FILE" ]]; then
     tr -d '[:space:]' < "$VERSION_FILE"
     return
@@ -122,24 +150,37 @@ require_root_capability() {
     SUDO="sudo"
     return
   fi
-  die "请使用 root 执行，或先安装 sudo。"
+  die "Please run as root (or install sudo)."
+}
+
+version_ge() {
+  local a="$1"
+  local b="$2"
+  [[ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" == "$b" ]]
+}
+
+node_version_of() {
+  local node_path="$1"
+  "$node_path" -v 2>/dev/null | sed 's/^v//'
+}
+
+npm_cmd() {
+  PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NPM_BIN" "$@"
+}
+
+pm2_cmd() {
+  PATH="$NPM_GLOBAL_PREFIX/bin:$NODE_RUNTIME_DIR/bin:$PATH" PM2_HOME="$PM2_HOME_DIR" "$PM2_BIN" "$@"
 }
 
 docker_engine_ready() {
-  if ! have_command docker; then
-    return 1
-  fi
-  as_root docker version >/dev/null 2>&1
+  have_command docker && as_root docker version >/dev/null 2>&1
 }
 
 docker_compose_available() {
   if have_command docker && as_root docker compose version >/dev/null 2>&1; then
     return 0
   fi
-  if have_command docker-compose; then
-    return 0
-  fi
-  return 1
+  have_command docker-compose
 }
 
 docker_compose_run() {
@@ -151,7 +192,7 @@ docker_compose_run() {
     as_root docker-compose -f "$COMPOSE_FILE" "$@"
     return
   fi
-  die "未检测到 Docker Compose。"
+  die "Docker Compose is not available."
 }
 
 ensure_docker_mirrors() {
@@ -176,12 +217,41 @@ EOF
   rm -f "$tmp_file"
 }
 
+load_saved_ports() {
+  if [[ -f "$RUNTIME_PORTS_FILE" ]]; then
+    local saved_api="" saved_web=""
+    saved_api="$(grep -E '^API_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+    saved_web="$(grep -E '^WEB_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+    if [[ "$API_PORT_SET" != "1" && -n "$saved_api" ]]; then
+      API_PORT="$saved_api"
+    fi
+    if [[ "$WEB_PORT_SET" != "1" && -n "$saved_web" ]]; then
+      WEB_PORT="$saved_web"
+    fi
+  fi
+}
+
+set_or_append_env() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if grep -Eq "^${key}=" "$file"; then
+    sed -i "s#^${key}=.*#${key}=\"${value}\"#g" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$file"
+  fi
+}
+
+first_host_ip() {
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
 ensure_runtime_files() {
   local config_dir="$API_DIR/config"
   local runtime_file="$config_dir/runtime-config.json"
   local runtime_example="$config_dir/runtime-config.example.json"
 
-  mkdir -p "$config_dir" "$API_DIR/logs"
+  mkdir -p "$config_dir" "$API_DIR/logs" "$RUNTIME_DIR"
   if [[ ! -f "$runtime_file" ]]; then
     if [[ -f "$runtime_example" ]]; then
       cp "$runtime_example" "$runtime_file"
@@ -199,36 +269,80 @@ ensure_runtime_files() {
   fi
 }
 
-dependencies_missing() {
-  local missing=0
-  for cmd in node npm pm2; do
-    if ! have_command "$cmd"; then
-      missing=1
-    fi
-  done
-  if [[ "$NO_DOCKER" != "1" ]]; then
-    if ! have_command docker || ! docker_engine_ready || ! docker_compose_available; then
-      missing=1
-    fi
+port_in_use() {
+  local port="$1"
+  if have_command lsof; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+    return
   fi
-  [[ "$missing" -eq 1 ]]
+  if have_command ss; then
+    ss -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"
+    return
+  fi
+  if have_command netstat; then
+    netstat -lnt 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+    return
+  fi
+  return 1
+}
+
+find_free_port() {
+  local base="$1"
+  local p="$base"
+  while port_in_use "$p"; do
+    p=$((p + 1))
+  done
+  echo "$p"
+}
+
+resolve_ports_with_conflict_guard() {
+  local api_owned=0 web_owned=0
+  if pm2_cmd describe mindwall-api >/dev/null 2>&1; then
+    api_owned=1
+  fi
+  if pm2_cmd describe mindwall-web >/dev/null 2>&1; then
+    web_owned=1
+  fi
+
+  if port_in_use "$API_PORT" && [[ "$api_owned" != "1" ]]; then
+    local next_api
+    next_api="$(find_free_port "$API_PORT")"
+    warn "API port $API_PORT is occupied by another service, switching to $next_api."
+    API_PORT="$next_api"
+  fi
+
+  if port_in_use "$WEB_PORT" && [[ "$web_owned" != "1" ]]; then
+    local next_web
+    next_web="$(find_free_port "$WEB_PORT")"
+    warn "Web port $WEB_PORT is occupied by another service, switching to $next_web."
+    WEB_PORT="$next_web"
+  fi
+}
+
+ensure_local_runtime_ready() {
+  if [[ ! -x "$NODE_BIN" || ! -x "$NPM_BIN" || ! -x "$PM2_BIN" ]]; then
+    return 1
+  fi
+  local current
+  current="$(node_version_of "$NODE_BIN" || true)"
+  [[ -n "$current" ]] && version_ge "$current" "$MIN_NODE_VERSION"
 }
 
 update_git_source() {
   if [[ "$SKIP_GIT" == "1" ]]; then
-    echo "已跳过 Git 拉取"
+    echo "Skip git pull."
     return
   fi
   if ! have_command git; then
-    warn "未检测到 git，跳过代码拉取。"
+    warn "git not found, skipping git pull."
     return
   fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn "当前目录不是 Git 仓库，跳过代码拉取。"
+    warn "Not a git repo, skipping git pull."
     return
   fi
   if ! git remote get-url origin >/dev/null 2>&1; then
-    warn "未配置 origin 远程仓库，跳过代码拉取。"
+    warn "origin remote not configured, skipping git pull."
     return
   fi
 
@@ -236,23 +350,11 @@ update_git_source() {
   dirty="$(git status --porcelain || true)"
   if [[ -n "$dirty" ]]; then
     if [[ "$YES" == "1" ]]; then
-      warn "检测到本地改动，--yes 模式跳过 git pull。"
+      warn "Local changes detected. --yes mode keeps changes and skips git pull."
       return
     fi
-    echo "检测到本地改动："
-    git status --short
-    local force_update="n"
-    read -r -p "是否丢弃本地改动并继续更新？[y/N]: " force_update
-    case "${force_update,,}" in
-      y|yes)
-        git reset --hard
-        git clean -fd
-        ;;
-      *)
-        echo "已保留本地改动，跳过 git pull。"
-        return
-        ;;
-    esac
+    warn "Local changes detected. Keeping local changes and skipping git pull."
+    return
   fi
 
   git fetch origin "$BRANCH" || return
@@ -284,22 +386,22 @@ wait_for_container() {
     sleep 2
     waited=$((waited + 2))
   done
-  die "容器 $name 在 ${timeout}s 内未就绪。"
+  die "Container $name is not ready after ${timeout}s."
 }
 
 start_infra() {
   if [[ "$NO_DOCKER" == "1" ]]; then
-    echo "[2/8] 跳过 Docker 启动"
+    echo "[2/9] Skip docker startup"
     return
   fi
-  echo "[2/8] 启动 PostgreSQL + Redis"
+  echo "[2/9] Starting PostgreSQL + Redis"
   local ok=0
   for attempt in 1 2 3; do
     if docker_compose_run up -d; then
       ok=1
       break
     fi
-    warn "Docker 启动失败，第 ${attempt} 次重试。"
+    warn "Docker startup failed (attempt $attempt)."
     ensure_docker_mirrors
     if [[ "$attempt" -eq 1 ]]; then
       try_prepull_images
@@ -309,7 +411,7 @@ start_infra() {
     fi
     sleep $((attempt * 5))
   done
-  [[ "$ok" -eq 1 ]] || die "Docker 镜像拉取失败(redis/pgvector)。"
+  [[ "$ok" -eq 1 ]] || die "Failed to start Docker services (redis/pgvector image pull failed)."
   wait_for_container "mindwall-postgres" 180
   wait_for_container "mindwall-redis" 90
 }
@@ -318,36 +420,82 @@ npm_install_with_fallback() {
   local dir="$1"
   cd "$dir"
   if [[ -f package-lock.json ]]; then
-    if ! npm ci; then
-      warn "npm ci 失败，回退 npm install。"
-      npm install
+    if ! npm_cmd ci; then
+      warn "npm ci failed in $dir, fallback to npm install."
+      npm_cmd install
     fi
   else
-    npm install
+    npm_cmd install
   fi
 }
 
-start_services() {
-  pm2 describe mindwall-api >/dev/null 2>&1 || \
-    pm2 start npm --name mindwall-api --cwd "$API_DIR" -- run start:prod
-  pm2 restart mindwall-api --update-env
+write_app_env_ports() {
+  local host
+  host="$(first_host_ip)"
+  if [[ -z "$host" ]]; then
+    host="localhost"
+  fi
+  local api_env="$API_DIR/.env"
+  set_or_append_env "$api_env" "PORT" "$API_PORT"
+  set_or_append_env "$api_env" "WEB_ORIGIN" "http://${host}:${WEB_PORT}"
+  set_or_append_env "$api_env" "APP_VERSION" "$(project_version)"
 
-  pm2 describe mindwall-web >/dev/null 2>&1 || \
-    pm2 start npm --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
-  pm2 restart mindwall-web --update-env
-  pm2 save
+  cat > "$WEB_DIR/.env.production.local" <<EOF
+VITE_API_BASE_URL=http://${host}:${API_PORT}
+VITE_WS_BASE_URL=ws://${host}:${API_PORT}
+EOF
+
+  mkdir -p "$RUNTIME_DIR"
+  cat > "$RUNTIME_PORTS_FILE" <<EOF
+API_PORT=$API_PORT
+WEB_PORT=$WEB_PORT
+EOF
+}
+
+start_services() {
+  pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
+    pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
+  pm2_cmd restart mindwall-api --update-env
+
+  pm2_cmd describe mindwall-web >/dev/null 2>&1 || \
+    pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
+  pm2_cmd restart mindwall-web --update-env
+  pm2_cmd save
+}
+
+print_summary() {
+  local ip
+  ip="$(first_host_ip)"
+  if [[ -z "$ip" ]]; then
+    ip="<server-ip>"
+  fi
+  echo
+  echo "Update complete: MindWall v$(project_version)"
+  echo "API port: $API_PORT"
+  echo "Web port: $WEB_PORT"
+  echo "Web URL:  http://${ip}:${WEB_PORT}"
+  echo "PM2_HOME: $PM2_HOME_DIR"
 }
 
 main() {
   require_root_capability
   cd "$ROOT_DIR"
 
-  echo "MindWall 更新部署 v$(get_version)"
-  echo "目录: $ROOT_DIR"
+  echo "MindWall update v$(project_version)"
+  echo "Root: $ROOT_DIR"
 
-  if dependencies_missing; then
-    warn "检测到依赖缺失，先执行 deploy.sh。"
-    local deploy_args=("--branch" "$BRANCH" "--web-port" "$WEB_PORT" "--yes")
+  load_saved_ports
+  validate_port "$API_PORT" || die "Invalid api port: $API_PORT"
+  validate_port "$WEB_PORT" || die "Invalid web port: $WEB_PORT"
+
+  if ! ensure_local_runtime_ready; then
+    warn "Local runtime is missing or outdated. Running deploy.sh first."
+    local deploy_args=(
+      "--branch" "$BRANCH"
+      "--api-port" "$API_PORT"
+      "--web-port" "$WEB_PORT"
+      "--yes"
+    )
     if [[ "$SKIP_GIT" == "1" ]]; then
       deploy_args+=("--skip-git")
     fi
@@ -357,45 +505,51 @@ main() {
     as_root bash "$ROOT_DIR/deploy.sh" "${deploy_args[@]}"
   fi
 
-  echo "[1/8] 更新代码"
+  if [[ "$NO_DOCKER" != "1" ]]; then
+    docker_engine_ready || die "Docker is not ready."
+    docker_compose_available || die "Docker Compose is not ready."
+  fi
+
+  echo "[1/9] Updating source"
   update_git_source
 
   start_infra
 
-  echo "[3/8] 检查运行配置"
+  echo "[3/9] Ensuring runtime files"
   ensure_runtime_files
+  resolve_ports_with_conflict_guard
+  write_app_env_ports
 
   if [[ "$SKIP_INSTALL" != "1" ]]; then
-    echo "[4/8] 安装 API/Web 依赖"
+    echo "[4/9] Installing API/Web dependencies"
     npm_install_with_fallback "$API_DIR"
     npm_install_with_fallback "$WEB_DIR"
   else
-    echo "[4/8] 已跳过依赖安装"
+    echo "[4/9] Skip dependency install"
   fi
 
-  echo "[5/8] Prisma 生成"
+  echo "[5/9] Prisma generate"
   cd "$API_DIR"
-  npm run prisma:generate
+  npm_cmd run prisma:generate
+
   if [[ "$SKIP_MIGRATE" != "1" ]]; then
-    echo "[6/8] Prisma 迁移"
-    npm run prisma:deploy
+    echo "[6/9] Prisma migrate deploy"
+    npm_cmd run prisma:deploy
   else
-    echo "[6/8] 已跳过 Prisma 迁移"
+    echo "[6/9] Skip prisma migrate deploy"
   fi
 
-  echo "[7/8] 构建 API/Web"
+  echo "[7/9] Building API/Web"
   cd "$API_DIR"
-  npm run build
+  npm_cmd run build
   cd "$WEB_DIR"
-  npm run build
+  npm_cmd run build
 
-  echo "[8/8] 重启 PM2 服务"
+  echo "[8/9] Restarting PM2 services"
   start_services
 
-  local ip
-  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  ip="${ip:-<服务器IP>}"
-  echo "更新完成: http://${ip}:${WEB_PORT}"
+  echo "[9/9] Done"
+  print_summary
 }
 
 main "$@"
