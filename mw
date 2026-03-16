@@ -17,7 +17,7 @@ if [[ $# -gt 0 ]]; then
   shift
 fi
 
-# 兼容 mw --yes 这种写法
+# 兼容写法: mw --yes => 等价于 mw auto --yes
 if [[ "${COMMAND#--}" != "$COMMAND" ]]; then
   set -- "$COMMAND" "$@"
   COMMAND="auto"
@@ -34,6 +34,9 @@ project_version() {
 usage() {
   cat <<'EOF'
 MindWall 终端命令面板
+
+默认部署为独立模式（mindwall-api + mindwall-web），不改全局 Nginx。
+如需 Nginx 代理，请在 deploy/update 后附加 --with-nginx。
 
 用法:
   mw                     自动模式（已部署则更新，未部署则安装）
@@ -91,10 +94,12 @@ show_status() {
     else
       echo "API 服务: 未运行"
     fi
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-      echo "Nginx 服务: 运行中"
+    if systemctl is-active --quiet mindwall-web 2>/dev/null; then
+      echo "Web 服务: 运行中（独立模式）"
+    elif systemctl is-active --quiet nginx 2>/dev/null; then
+      echo "Web 服务: 运行中（Nginx 模式）"
     else
-      echo "Nginx 服务: 未运行"
+      echo "Web 服务: 未运行"
     fi
   else
     echo "systemd: 不可用"

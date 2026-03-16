@@ -35,6 +35,7 @@ MindWall 更新脚本
   --api-port <port>       API 端口
   --web-port <port>       Web 端口
   --public-host <host>    域名或公网 IP
+  --with-nginx            使用 Nginx 代理模式（默认独立模式）
   --skip-git              跳过 Git 拉取
   --no-docker             跳过 Docker
   --ssl                   尝试配置 HTTPS

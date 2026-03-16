@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]:-$0}"
@@ -22,7 +22,9 @@ RUNTIME_PORTS_FILE="$RUNTIME_DIR/ports.env"
 API_ENV_FILE="$API_DIR/.env"
 WEB_ENV_PROD_FILE="$WEB_DIR/.env.production.local"
 SYSTEMD_API_SERVICE_FILE="/etc/systemd/system/mindwall-api.service"
+SYSTEMD_WEB_SERVICE_FILE="/etc/systemd/system/mindwall-web.service"
 NGINX_CONF_FILE="/etc/nginx/conf.d/mindwall.conf"
+RUNTIME_WEB_SERVER_FILE="$RUNTIME_DIR/mindwall-web-server.cjs"
 
 MIN_NODE_VERSION="${MIN_NODE_VERSION:-22.14.0}"
 LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-22.14.0}"
@@ -34,7 +36,8 @@ fi
 
 BRANCH="${BRANCH:-$CURRENT_BRANCH}"
 API_PORT="${API_PORT:-3100}"
-WEB_PORT="${WEB_PORT:-3001}"
+DEFAULT_WEB_PORT="3001"
+WEB_PORT="${WEB_PORT:-$DEFAULT_WEB_PORT}"
 API_PORT_SET=0
 WEB_PORT_SET=0
 SAVED_API_PORT=""
@@ -43,6 +46,7 @@ PUBLIC_HOST="${PUBLIC_HOST:-}"
 SKIP_GIT="${SKIP_GIT:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 ENABLE_SSL="${ENABLE_SSL:-0}"
+USE_NGINX="${USE_NGINX:-0}"
 SKIP_SYSTEM_INSTALL="${SKIP_SYSTEM_INSTALL:-0}"
 YES="${YES:-0}"
 SSL_ACTIVATED=0
@@ -54,7 +58,7 @@ OS_LIKE=""
 
 usage() {
   cat <<'EOF'
-MindWall 部署脚本（Nginx + systemd）
+MindWall 部署脚本（默认独立模式，不影响全局 Nginx）
 
 用法:
   sudo bash deploy.sh [选项]
@@ -66,7 +70,8 @@ MindWall 部署脚本（Nginx + systemd）
   --public-host <host>      公网域名或公网 IP（用于展示与 CORS）
   --skip-git                跳过 Git 拉取
   --no-docker               跳过 Docker（不启动 PostgreSQL/Redis）
-  --ssl                     尝试使用 certbot 配置 HTTPS（需域名 + 80 端口）
+  --with-nginx              启用 Nginx 反向代理模式（默认关闭，避免影响其他项目）
+  --ssl                     仅在 --with-nginx 下尝试配置 HTTPS
   --skip-system-install     跳过系统依赖安装（适合更新场景）
   --yes                     非交互模式（本地改动默认保留）
   -h, --help                显示帮助
@@ -107,6 +112,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ssl)
       ENABLE_SSL="1"
+      shift
+      ;;
+    --with-nginx)
+      USE_NGINX="1"
+      shift
+      ;;
+    --no-nginx)
+      USE_NGINX="0"
       shift
       ;;
     --skip-system-install)
@@ -331,7 +344,14 @@ load_saved_ports() {
   fi
   if [[ "$WEB_PORT_SET" != "1" ]]; then
     if [[ -n "$SAVED_WEB_PORT" ]]; then
-      WEB_PORT="$SAVED_WEB_PORT"
+      # 为避免破坏服务器既有 80/443 站点，默认不自动沿用历史 80/443。
+      # 如确需监听 80/443，请显式传入 --web-port 80/443。
+      if [[ "$SAVED_WEB_PORT" == "80" || "$SAVED_WEB_PORT" == "443" ]]; then
+        warn "检测到历史 Web 端口为 $SAVED_WEB_PORT，为保护现有站点，默认回退到 $DEFAULT_WEB_PORT（可用 --web-port 显式指定）。"
+        WEB_PORT="$DEFAULT_WEB_PORT"
+      else
+        WEB_PORT="$SAVED_WEB_PORT"
+      fi
     fi
   fi
 }
@@ -456,7 +476,7 @@ saved_port_occupant_allowed() {
     if is_pid_mindwall_related "$pid"; then
       continue
     fi
-    if [[ "$kind" == "web" ]] && is_pid_nginx "$pid"; then
+    if [[ "$USE_NGINX" == "1" && "$kind" == "web" ]] && is_pid_nginx "$pid"; then
       continue
     fi
     return 1
@@ -569,16 +589,28 @@ install_base_tools() {
   pkg_update_cache
   case "$PKG_MANAGER" in
     apt)
-      pkg_install ca-certificates curl git tar xz-utils lsof nginx jq
+      pkg_install ca-certificates curl git tar xz-utils lsof jq
+      if [[ "$USE_NGINX" == "1" ]]; then
+        pkg_install_optional nginx
+      fi
       ;;
     dnf|yum)
-      pkg_install ca-certificates curl git tar xz lsof nginx jq
+      pkg_install ca-certificates curl git tar xz lsof jq
+      if [[ "$USE_NGINX" == "1" ]]; then
+        pkg_install_optional nginx
+      fi
       ;;
     zypper)
-      pkg_install ca-certificates curl git tar xz lsof nginx jq
+      pkg_install ca-certificates curl git tar xz lsof jq
+      if [[ "$USE_NGINX" == "1" ]]; then
+        pkg_install_optional nginx
+      fi
       ;;
     pacman)
-      pkg_install ca-certificates curl git tar xz lsof nginx jq
+      pkg_install ca-certificates curl git tar xz lsof jq
+      if [[ "$USE_NGINX" == "1" ]]; then
+        pkg_install_optional nginx
+      fi
       ;;
     *)
       die "不支持的系统包管理器，无法自动安装基础工具。"
@@ -992,13 +1024,242 @@ EOF
   fi
 }
 
+write_runtime_web_server() {
+  mkdir -p "$RUNTIME_DIR"
+  cat > "$RUNTIME_WEB_SERVER_FILE" <<'EOF'
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const net = require('node:net');
+const { URL } = require('node:url');
+
+const WEB_PORT = Number(process.env.WEB_PORT || 3001);
+const API_PORT = Number(process.env.API_PORT || 3100);
+const WEB_DIST_DIR = process.env.WEB_DIST_DIR || path.resolve(__dirname, '../apps/web/dist');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function sendJson(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function safePathFromUrl(inputPathname) {
+  const normalized = path.normalize(inputPathname).replace(/^(\.\.(\/|\\|$))+/, '');
+  const candidate = path.join(WEB_DIST_DIR, normalized);
+  const rel = path.relative(WEB_DIST_DIR, candidate);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+  return candidate;
+}
+
+function proxyHttp(req, res) {
+  const parsed = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  let upstreamPath = parsed.pathname;
+  if (upstreamPath === '/api') {
+    upstreamPath = '/';
+  } else if (upstreamPath.startsWith('/api/')) {
+    upstreamPath = upstreamPath.slice(4);
+  }
+  const finalPath = `${upstreamPath}${parsed.search || ''}`;
+
+  const headers = { ...req.headers, host: `127.0.0.1:${API_PORT}` };
+  const upstreamReq = http.request(
+    {
+      host: '127.0.0.1',
+      port: API_PORT,
+      method: req.method,
+      path: finalPath,
+      headers,
+    },
+    (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    },
+  );
+
+  upstreamReq.on('error', (error) => {
+    sendJson(res, 502, { message: 'API 代理失败', detail: String(error.message || error) });
+  });
+
+  req.pipe(upstreamReq);
+}
+
+function serveStatic(req, res) {
+  const parsed = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  let pathname = decodeURIComponent(parsed.pathname || '/');
+  if (pathname.endsWith('/')) {
+    pathname += 'index.html';
+  }
+
+  let filePath = safePathFromUrl(pathname);
+  if (!filePath || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(WEB_DIST_DIR, 'index.html');
+  }
+
+  fs.readFile(filePath, (error, data) => {
+    if (error) {
+      sendJson(res, 404, { message: '页面不存在' });
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = MIME_TYPES[ext] || 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': mime });
+    res.end(data);
+  });
+}
+
+function proxyUpgrade(req, socket, head) {
+  const upstream = net.connect(API_PORT, '127.0.0.1');
+  upstream.on('connect', () => {
+    const startLine = `${req.method} ${req.url || '/'} HTTP/${req.httpVersion}\r\n`;
+    let headers = '';
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (key.toLowerCase() === 'host') {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          headers += `${key}: ${item}\r\n`;
+        }
+      } else if (typeof value !== 'undefined') {
+        headers += `${key}: ${value}\r\n`;
+      }
+    }
+    headers += `host: 127.0.0.1:${API_PORT}\r\n\r\n`;
+
+    upstream.write(startLine + headers);
+    if (head && head.length > 0) {
+      upstream.write(head);
+    }
+    socket.pipe(upstream).pipe(socket);
+  });
+
+  upstream.on('error', () => {
+    socket.destroy();
+  });
+  socket.on('error', () => {
+    upstream.destroy();
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const pathname = (req.url || '/').split('?')[0];
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
+    proxyHttp(req, res);
+    return;
+  }
+  serveStatic(req, res);
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const pathname = (req.url || '/').split('?')[0];
+  if (!pathname.startsWith('/ws/')) {
+    socket.destroy();
+    return;
+  }
+  proxyUpgrade(req, socket, head);
+});
+
+server.listen(WEB_PORT, '0.0.0.0', () => {
+  process.stdout.write(`MindWall Web Server listening on :${WEB_PORT}, proxy api -> :${API_PORT}\n`);
+});
+EOF
+}
+
+disable_web_service_if_running() {
+  if ! have_command systemctl; then
+    return
+  fi
+  if as_root systemctl list-unit-files | grep -q '^mindwall-web\.service'; then
+    as_root systemctl stop mindwall-web || true
+    as_root systemctl disable mindwall-web || true
+  fi
+}
+
+setup_systemd_web() {
+  if [[ "$USE_NGINX" == "1" ]]; then
+    disable_web_service_if_running
+    return
+  fi
+
+  echo "[11/12] 配置并启动 Web systemd 服务（独立模式）"
+  if ! have_command systemctl; then
+    die "当前系统不支持 systemd，无法自动托管 Web 进程。"
+  fi
+
+  write_runtime_web_server
+
+  cat > /tmp/mindwall-web.service <<EOF
+[Unit]
+Description=MindWall Web Service
+After=network.target mindwall-api.service
+Wants=mindwall-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT_DIR
+Environment=NODE_ENV=production
+Environment="PATH=$NODE_RUNTIME_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="WEB_PORT=$WEB_PORT"
+Environment="API_PORT=$API_PORT"
+Environment="WEB_DIST_DIR=$WEB_DIR/dist"
+ExecStart=$NODE_BIN $RUNTIME_WEB_SERVER_FILE
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  as_root mv /tmp/mindwall-web.service "$SYSTEMD_WEB_SERVICE_FILE"
+  as_root systemctl daemon-reload
+  as_root systemctl enable mindwall-web
+  as_root systemctl restart mindwall-web
+
+  sleep 2
+  if ! as_root systemctl is-active --quiet mindwall-web; then
+    echo "=========== Web 服务启动日志 ==========="
+    as_root journalctl -u mindwall-web -n 30 --no-pager || true
+    echo "========================================"
+    die "mindwall-web 启动失败，请检查上方的 journalctl 错误日志。"
+  fi
+}
+
 write_nginx_config() {
+  if [[ "$USE_NGINX" != "1" ]]; then
+    return
+  fi
+
   echo "[11/12] 配置并启动 Nginx"
   if ! have_command nginx; then
     die "未找到 nginx，请先安装 nginx。"
   fi
   local server_name="_"
-  if [[ -n "$PUBLIC_HOST" ]]; then
+  # 对公网 IP 不写 server_name，避免与现有 80 站点产生冲突告警
+  if [[ -n "$PUBLIC_HOST" ]] && ! is_ipv4 "$PUBLIC_HOST"; then
     server_name="$PUBLIC_HOST"
   fi
 
@@ -1037,19 +1298,55 @@ server {
 }
 EOF
 
+  local backup_file=""
+  if [[ -f "$NGINX_CONF_FILE" ]]; then
+    backup_file="${NGINX_CONF_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
+    as_root cp "$NGINX_CONF_FILE" "$backup_file"
+  fi
+
   as_root mkdir -p /etc/nginx/conf.d
   as_root mv /tmp/mindwall-nginx.conf "$NGINX_CONF_FILE"
 
-  as_root nginx -t
+  if ! as_root nginx -t; then
+    warn "Nginx 配置检测失败，正在回滚 MindWall Nginx 配置。"
+    if [[ -n "$backup_file" && -f "$backup_file" ]]; then
+      as_root cp "$backup_file" "$NGINX_CONF_FILE"
+    else
+      as_root rm -f "$NGINX_CONF_FILE"
+    fi
+    as_root nginx -t || true
+    die "Nginx 配置检测失败，已自动回滚。"
+  fi
+
   if have_command systemctl; then
     as_root systemctl enable nginx || true
-    as_root systemctl restart nginx
+    # 只 reload，不重启，尽量不影响服务器上其他站点
+    if ! as_root systemctl reload nginx; then
+      warn "Nginx 重载失败，正在回滚 MindWall Nginx 配置。"
+      if [[ -n "$backup_file" && -f "$backup_file" ]]; then
+        as_root cp "$backup_file" "$NGINX_CONF_FILE"
+      else
+        as_root rm -f "$NGINX_CONF_FILE"
+      fi
+      as_root nginx -t || true
+      as_root systemctl reload nginx || as_root systemctl restart nginx || true
+      die "Nginx 重载失败，已回滚 MindWall 配置，请执行 systemctl status nginx 查看详情。"
+    fi
   else
     as_root nginx -s reload || as_root nginx
   fi
 }
 
 setup_ssl() {
+  if [[ "$USE_NGINX" != "1" ]]; then
+    if [[ "$ENABLE_SSL" == "1" ]]; then
+      warn "当前为独立模式（未启用 --with-nginx），已跳过 SSL 自动配置。"
+    else
+      echo "[12/12] 跳过 SSL（独立模式）"
+    fi
+    return
+  fi
+
   if [[ "$ENABLE_SSL" != "1" ]]; then
     echo "[12/12] 跳过 SSL（未指定 --ssl）"
     return
@@ -1096,14 +1393,23 @@ print_summary() {
   if [[ "$SSL_ACTIVATED" == "1" ]]; then
     schema="https"
   fi
+  local mode_text="独立模式（systemd: mindwall-api + mindwall-web，不改 Nginx）"
+  if [[ "$USE_NGINX" == "1" ]]; then
+    mode_text="Nginx 模式（mindwall-api + 全局 Nginx 反向代理）"
+  fi
 
   echo
   echo "部署完成: MindWall v$(project_version)"
+  echo "部署模式: $mode_text"
   echo "API 端口: $API_PORT"
   echo "Web 端口: $WEB_PORT"
   echo "Web 地址: ${schema}://${host}:${WEB_PORT}"
   echo "本地 Node 路径: $NODE_RUNTIME_DIR"
-  echo "系统服务: mindwall-api"
+  if [[ "$USE_NGINX" == "1" ]]; then
+    echo "系统服务: mindwall-api, nginx"
+  else
+    echo "系统服务: mindwall-api, mindwall-web"
+  fi
   echo "更新命令: sudo bash $ROOT_DIR/update.sh"
   if is_private_ipv4 "$host"; then
     echo "警告: 当前展示的是内网 IP（$host），公网访问请使用 --public-host 指定域名或公网 IP。"
@@ -1137,6 +1443,7 @@ main() {
   start_infra
   install_deps_migrate_build
   setup_systemd_api
+  setup_systemd_web
   write_nginx_config
   setup_ssl
   print_summary
