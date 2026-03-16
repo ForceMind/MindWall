@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]:-$0}"
@@ -759,7 +759,10 @@ write_api_env() {
   set_env_value "$API_ENV_FILE" "APP_VERSION" "$(project_version)"
 
   if ! grep -qE '^DATABASE_URL=' "$API_ENV_FILE"; then
-    set_env_value "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@localhost:5432/mindwall?schema=public"
+    set_env_value "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@127.0.0.1:5432/mindwall?schema=public"
+  else
+    # 强制将 localhost 修正为 127.0.0.1，防止 Node 17+ 优先解析 IPv6 ::1 导致无法连接 Docker 映射的 IPv4 端口
+    sed -i 's/@localhost:5432/@127.0.0.1:5432/g' "$API_ENV_FILE" || true
   fi
 }
 
@@ -822,6 +825,11 @@ setup_systemd_api() {
     die "当前系统不支持 systemd，无法自动托管 API 进程。"
   fi
 
+  local entry_file="$API_DIR/dist/src/main.js"
+  if [[ ! -f "$entry_file" && -f "$API_DIR/dist/main.js" ]]; then
+    entry_file="$API_DIR/dist/main.js"
+  fi
+
   cat > /tmp/mindwall-api.service <<EOF
 [Unit]
 Description=MindWall API Service
@@ -832,8 +840,9 @@ Wants=docker.service
 Type=simple
 WorkingDirectory=$API_DIR
 Environment=NODE_ENV=production
+Environment="PATH=$NODE_RUNTIME_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile=$API_ENV_FILE
-ExecStart=$NODE_BIN $API_DIR/dist/src/main.js
+ExecStart=$NODE_BIN $entry_file
 Restart=always
 RestartSec=3
 User=root
@@ -849,7 +858,10 @@ EOF
 
   sleep 2
   if ! as_root systemctl is-active --quiet mindwall-api; then
-    die "mindwall-api 启动失败，请检查: journalctl -u mindwall-api -n 100"
+    echo "=========== API 服务启动日志 ==========="
+    as_root journalctl -u mindwall-api -n 30 --no-pager || true
+    echo "========================================"
+    die "mindwall-api 启动失败，请检查上方的 journalctl 错误日志。"
   fi
 }
 
