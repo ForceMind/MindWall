@@ -2,16 +2,16 @@
 import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 
-function resolveAllowedHosts(): true | string[] {
+function resolveAllowedHosts(): 'all' | string[] {
   const raw = (process.env.VITE_ALLOWED_HOSTS || '').trim();
   if (!raw) {
-    return true;
+    return 'all';
   }
   const hosts = raw
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-  return hosts.length > 0 ? hosts : true;
+  return hosts.length > 0 ? hosts : 'all';
 }
 
 const allowedHosts = resolveAllowedHosts();

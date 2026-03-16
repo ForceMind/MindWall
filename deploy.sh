@@ -30,6 +30,8 @@ PUBLIC_HOST="${PUBLIC_HOST:-}"
 SKIP_GIT="${SKIP_GIT:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 YES="${YES:-0}"
+API_PORT_SET=0
+WEB_PORT_SET=0
 
 SUDO=""
 PKG_MANAGER=""
@@ -63,11 +65,13 @@ while [[ $# -gt 0 ]]; do
     --api-port)
       [[ $# -ge 2 ]] || { echo "错误: --api-port 缺少参数值"; exit 1; }
       API_PORT="$2"
+      API_PORT_SET=1
       shift 2
       ;;
     --web-port)
       [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数值"; exit 1; }
       WEB_PORT="$2"
+      WEB_PORT_SET=1
       shift 2
       ;;
     --public-host)
@@ -534,6 +538,19 @@ pm2_app_owns_port() {
       fi
     fi
   done
+
+  # 兜底：检查监听该端口的进程是否使用了我们的 Node 运行时
+  local port_pids exe
+  port_pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  for pid in $port_pids; do
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
+      exe="$(readlink -f /proc/$pid/exe 2>/dev/null || true)"
+      if [[ "$exe" == "$NODE_BIN" ]]; then
+        return 0
+      fi
+    fi
+  done
+
   return 1
 }
 
@@ -544,6 +561,20 @@ find_free_port() {
     p=$((p + 1))
   done
   echo "$p"
+}
+
+load_saved_ports() {
+  if [[ -f "$RUNTIME_PORTS_FILE" ]]; then
+    local saved_api="" saved_web=""
+    saved_api="$(grep -E '^API_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+    saved_web="$(grep -E '^WEB_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+    if [[ "$API_PORT_SET" != "1" && -n "$saved_api" ]]; then
+      API_PORT="$saved_api"
+    fi
+    if [[ "$WEB_PORT_SET" != "1" && -n "$saved_web" ]]; then
+      WEB_PORT="$saved_web"
+    fi
+  fi
 }
 
 ensure_ports() {
@@ -777,15 +808,19 @@ build_project() {
 
 start_services() {
   echo "[12/12] 启动 PM2 服务（独立 PM2_HOME）"
-  local allow_host
-  allow_host="$(resolve_public_host)"
+  # 若用户通过 --public-host 指定了域名，则只允许该域名访问；
+  # 否则留空，vite.config.ts 将返回 'all'（放行所有 host）。
+  local vite_allowed_hosts=""
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    vite_allowed_hosts="$PUBLIC_HOST"
+  fi
   pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
     pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
   pm2_cmd restart mindwall-api --update-env
 
   # Web 进程总是按当前端口和主机白名单重建，避免旧参数残留（如端口仍停留在 3001）
   pm2_cmd delete mindwall-web >/dev/null 2>&1 || true
-  __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
+  VITE_ALLOWED_HOSTS="$vite_allowed_hosts" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
   pm2_cmd save
 }
 
@@ -813,6 +848,7 @@ main() {
   detect_os
   detect_pkg_manager
 
+  load_saved_ports
   validate_port "$API_PORT" || die "API 端口不合法: $API_PORT"
   validate_port "$WEB_PORT" || die "Web 端口不合法: $WEB_PORT"
 

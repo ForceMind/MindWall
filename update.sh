@@ -347,6 +347,19 @@ pm2_app_owns_port() {
       fi
     fi
   done
+
+  # 兜底：检查监听该端口的进程是否使用了我们的 Node 运行时
+  local port_pids exe
+  port_pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  for pid in $port_pids; do
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
+      exe="$(readlink -f /proc/$pid/exe 2>/dev/null || true)"
+      if [[ "$exe" == "$NODE_BIN" ]]; then
+        return 0
+      fi
+    fi
+  done
+
   return 1
 }
 
@@ -549,15 +562,19 @@ EOF
 }
 
 start_services() {
-  local allow_host
-  allow_host="$(resolve_public_host)"
+  # 若用户通过 --public-host 指定了域名，则只允许该域名访问；
+  # 否则留空，vite.config.ts 将返回 'all'（放行所有 host）。
+  local vite_allowed_hosts=""
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    vite_allowed_hosts="$PUBLIC_HOST"
+  fi
   pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
     pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
   pm2_cmd restart mindwall-api --update-env
 
   # Web 进程总是按当前端口和主机白名单重建，避免旧参数残留（如端口仍停留在 3001）
   pm2_cmd delete mindwall-web >/dev/null 2>&1 || true
-  __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
+  VITE_ALLOWED_HOSTS="$vite_allowed_hosts" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
   pm2_cmd save
 }
 
