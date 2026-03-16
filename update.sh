@@ -529,13 +529,15 @@ EOF
 }
 
 start_services() {
+  local allow_host
+  allow_host="$(resolve_public_host)"
   pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
     pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
   pm2_cmd restart mindwall-api --update-env
 
   pm2_cmd describe mindwall-web >/dev/null 2>&1 || \
-    pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
-  pm2_cmd restart mindwall-web --update-env
+    __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
+  __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd restart mindwall-web --update-env
   pm2_cmd save
 }
 
