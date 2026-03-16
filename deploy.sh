@@ -840,3 +840,18 @@ main() {
 }
 
 main "$@"
+
+  if [[ "$NO_DOCKER" != "1" ]]; then
+    start_infra
+  fi
+
+  echo "[8/10] 安装依赖、Prisma 迁移、构建..."
+  install_deps_migrate_build
+
+  setup_systemd_api
+  write_nginx_config
+  setup_ssl
+  print_summary
+}
+
+main "$@"
