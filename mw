@@ -159,6 +159,19 @@ detect_pkg_manager() {
   fi
 }
 
+detect_linux_id() {
+  if [[ -f /etc/os-release ]]; then
+    local id_line
+    id_line="$(grep -E '^ID=' /etc/os-release | head -n 1 || true)"
+    id_line="${id_line#ID=}"
+    id_line="${id_line%\"}"
+    id_line="${id_line#\"}"
+    echo "${id_line,,}"
+    return
+  fi
+  echo "unknown"
+}
+
 refresh_package_index() {
   detect_pkg_manager
   case "$PKG_MANAGER" in
@@ -346,6 +359,9 @@ install_docker_compose_if_needed() {
 
 install_docker() {
   echo "[安装 2/5] 安装 Docker"
+  detect_pkg_manager
+  local linux_id
+  linux_id="$(detect_linux_id)"
 
   if ! have_command curl; then
     echo "错误：缺少 curl，无法安装 Docker。"
@@ -354,33 +370,52 @@ install_docker() {
 
   if ! have_command docker || ! docker_engine_ready; then
     local ok=0
-    for _ in 1 2 3; do
-      if as_root sh -c "curl -fsSL https://get.docker.com | sh"; then
-        ok=1
-        break
-      fi
-      echo "Docker 安装下载失败，3 秒后重试..."
-      sleep 3
-    done
 
-    if [[ "$ok" -ne 1 ]]; then
-      echo "get.docker.com 安装失败，尝试使用系统包管理器安装 Docker..."
-      detect_pkg_manager
-      case "$PKG_MANAGER" in
-        apt)
-          install_packages docker.io || true
-          ;;
-        dnf|yum)
-          install_packages docker-ce docker-ce-cli containerd.io docker-compose-plugin || true
-          install_packages docker docker-compose || true
-          ;;
-        zypper)
-          install_packages docker docker-compose || true
-          ;;
-        pacman)
-          install_packages docker docker-compose || true
-          ;;
-      esac
+    # 先走系统包管理器，OpenCloudOS 必须走这里（get.docker.com 不支持）
+    case "$PKG_MANAGER" in
+      apt)
+        install_packages docker.io docker-compose-plugin || install_packages docker.io docker-compose || true
+        ;;
+      dnf)
+        install_packages dnf-plugins-core || true
+        as_root dnf config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo || true
+        as_root dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+        install_packages docker-ce docker-ce-cli containerd.io docker-compose-plugin || true
+        install_packages docker docker-compose || true
+        ;;
+      yum)
+        install_packages yum-utils || true
+        as_root yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo || true
+        as_root yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+        install_packages docker-ce docker-ce-cli containerd.io docker-compose-plugin || true
+        install_packages docker docker-compose || true
+        ;;
+      zypper)
+        install_packages docker docker-compose || true
+        ;;
+      pacman)
+        install_packages docker docker-compose || true
+        ;;
+    esac
+
+    if have_command systemctl; then
+      as_root systemctl enable --now docker || as_root systemctl restart docker || true
+    fi
+    if docker_engine_ready; then
+      ok=1
+    fi
+
+    # 非 OpenCloudOS 且包管理器失败时，才回退 get.docker.com
+    if [[ "$ok" -ne 1 && "$linux_id" != "opencloudos" ]]; then
+      echo "系统包安装未成功，尝试 get.docker.com..."
+      for _ in 1 2; do
+        if as_root sh -c "curl -fsSL https://get.docker.com | sh"; then
+          ok=1
+          break
+        fi
+        echo "Docker 脚本安装失败，3 秒后重试..."
+        sleep 3
+      done
       if have_command systemctl; then
         as_root systemctl enable --now docker || as_root systemctl restart docker || true
       fi
@@ -390,7 +425,7 @@ install_docker() {
     fi
 
     if [[ "$ok" -ne 1 ]]; then
-      echo "错误：无法下载安装 Docker（网络重置或源不可达）。"
+      echo "错误：Docker 安装失败，当前系统：$linux_id。请检查仓库与网络后重试。"
       exit 1
     fi
   fi
