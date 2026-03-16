@@ -48,6 +48,8 @@ async function bootstrap() {
     [
       aiConfig.webOrigin,
       process.env.WEB_ORIGIN,
+      process.env.PUBLIC_HOST ? `http://${process.env.PUBLIC_HOST}` : undefined,
+      process.env.PUBLIC_HOST ? `https://${process.env.PUBLIC_HOST}` : undefined,
       'http://localhost:3000',
       'http://localhost:3001',
       'http://127.0.0.1:3000',
@@ -75,7 +77,8 @@ async function bootstrap() {
     credentials: true,
   });
 
-  await app.listen(process.env.PORT ?? 3100);
+  // 绑定 127.0.0.1：API 不直接对外暴露，通过 nginx /api/ 代理访问
+  await app.listen(process.env.PORT ?? 3100, '127.0.0.1');
 }
 
 bootstrap();
