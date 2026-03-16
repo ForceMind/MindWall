@@ -330,6 +330,26 @@ port_in_use() {
   return 1
 }
 
+pm2_app_owns_port() {
+  local app="$1"
+  local port="$2"
+
+  if ! have_command lsof; then
+    return 1
+  fi
+
+  local pids pid
+  pids="$(pm2_cmd pid "$app" 2>/dev/null || true)"
+  for pid in $pids; do
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
+      if lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 find_free_port() {
   local base="$1"
   local p="$base"
@@ -341,10 +361,10 @@ find_free_port() {
 
 resolve_ports_with_conflict_guard() {
   local api_owned=0 web_owned=0
-  if pm2_cmd describe mindwall-api >/dev/null 2>&1; then
+  if port_in_use "$API_PORT" && pm2_app_owns_port "mindwall-api" "$API_PORT"; then
     api_owned=1
   fi
-  if pm2_cmd describe mindwall-web >/dev/null 2>&1; then
+  if port_in_use "$WEB_PORT" && pm2_app_owns_port "mindwall-web" "$WEB_PORT"; then
     web_owned=1
   fi
 

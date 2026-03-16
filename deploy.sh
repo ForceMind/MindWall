@@ -517,6 +517,26 @@ port_in_use() {
   return 1
 }
 
+pm2_app_owns_port() {
+  local app="$1"
+  local port="$2"
+
+  if ! have_command lsof; then
+    return 1
+  fi
+
+  local pids pid
+  pids="$(pm2_cmd pid "$app" 2>/dev/null || true)"
+  for pid in $pids; do
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; then
+      if lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 find_free_port() {
   local base="$1"
   local p="$base"
@@ -530,12 +550,20 @@ ensure_ports() {
   echo "[6/12] 处理端口占用"
 
   local chosen_api chosen_web
-  chosen_api="$(find_free_port "$API_PORT")"
+  if port_in_use "$API_PORT" && pm2_app_owns_port "mindwall-api" "$API_PORT"; then
+    chosen_api="$API_PORT"
+  else
+    chosen_api="$(find_free_port "$API_PORT")"
+  fi
   if [[ "$chosen_api" != "$API_PORT" ]]; then
     warn "API 端口 $API_PORT 已被占用，改用 $chosen_api。"
   fi
 
-  chosen_web="$(find_free_port "$WEB_PORT")"
+  if port_in_use "$WEB_PORT" && pm2_app_owns_port "mindwall-web" "$WEB_PORT"; then
+    chosen_web="$WEB_PORT"
+  else
+    chosen_web="$(find_free_port "$WEB_PORT")"
+  fi
   if [[ "$chosen_web" != "$WEB_PORT" ]]; then
     warn "Web 端口 $WEB_PORT 已被占用，改用 $chosen_web。"
   fi
