@@ -1,0 +1,618 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+API_DIR="$ROOT_DIR/apps/api"
+WEB_DIR="$ROOT_DIR/apps/web"
+COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
+VERSION_FILE="$ROOT_DIR/VERSION"
+
+COMMAND="${1:-auto}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+# 如果第一个参数是选项，则按 auto 处理
+if [[ "${COMMAND#--}" != "$COMMAND" ]]; then
+  set -- "$COMMAND" "$@"
+  COMMAND="auto"
+fi
+
+BRANCH="${BRANCH:-main}"
+WEB_PORT="${WEB_PORT:-3001}"
+NODE_MAJOR="${NODE_MAJOR:-22}"
+SKIP_GIT="${SKIP_GIT:-0}"
+SKIP_INSTALL="${SKIP_INSTALL:-0}"
+SKIP_MIGRATE="${SKIP_MIGRATE:-0}"
+NO_DOCKER="${NO_DOCKER:-0}"
+YES="${YES:-0}"
+
+SUDO=""
+PKG_MANAGER=""
+
+usage() {
+  cat <<'EOF'
+MindWall 服务器脚本（单入口）
+
+用法：
+  mw                   自动识别安装/更新（默认）
+  mw auto              自动识别安装/更新
+  mw install           仅安装服务器依赖
+  mw update            仅执行更新部署
+  mw status            查看服务状态
+  mw help              显示帮助
+
+参数：
+  --branch <name>      指定分支，默认 main
+  --web-port <port>    Web 端口，默认 3001
+  --skip-git           跳过拉代码
+  --skip-install       跳过 npm ci
+  --skip-migrate       跳过 Prisma 迁移
+  --no-docker          跳过 Docker 步骤
+  --yes                非交互模式（默认不重装依赖）
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch)
+      [[ $# -ge 2 ]] || { echo "参数错误：--branch 缺少值"; exit 1; }
+      BRANCH="$2"
+      shift 2
+      ;;
+    --web-port)
+      [[ $# -ge 2 ]] || { echo "参数错误：--web-port 缺少值"; exit 1; }
+      WEB_PORT="$2"
+      shift 2
+      ;;
+    --skip-git)
+      SKIP_GIT="1"
+      shift
+      ;;
+    --skip-install)
+      SKIP_INSTALL="1"
+      shift
+      ;;
+    --skip-migrate)
+      SKIP_MIGRATE="1"
+      shift
+      ;;
+    --no-docker)
+      NO_DOCKER="1"
+      shift
+      ;;
+    --yes)
+      YES="1"
+      shift
+      ;;
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "未知参数：$1"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+have_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+as_root() {
+  if [[ -n "$SUDO" ]]; then
+    "$SUDO" "$@"
+  else
+    "$@"
+  fi
+}
+
+require_root_capability() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    SUDO=""
+    return
+  fi
+  if have_command sudo; then
+    SUDO="sudo"
+    return
+  fi
+  echo "错误：当前不是 root 且未安装 sudo，请使用 root 执行。"
+  exit 1
+}
+
+get_project_version() {
+  if [[ -f "$VERSION_FILE" ]]; then
+    local raw
+    raw="$(tr -d '[:space:]' < "$VERSION_FILE")"
+    if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+      echo "$raw"
+      return
+    fi
+  fi
+  echo "1.0.0"
+}
+
+detect_pkg_manager() {
+  if [[ -n "$PKG_MANAGER" ]]; then
+    return
+  fi
+  if have_command apt-get; then
+    PKG_MANAGER="apt"
+  elif have_command dnf; then
+    PKG_MANAGER="dnf"
+  elif have_command yum; then
+    PKG_MANAGER="yum"
+  elif have_command zypper; then
+    PKG_MANAGER="zypper"
+  elif have_command pacman; then
+    PKG_MANAGER="pacman"
+  else
+    echo "错误：不支持当前 Linux 包管理器，请手动安装依赖。"
+    exit 1
+  fi
+}
+
+refresh_package_index() {
+  detect_pkg_manager
+  case "$PKG_MANAGER" in
+    apt)
+      as_root apt-get update -y
+      ;;
+    dnf)
+      as_root dnf makecache -y
+      ;;
+    yum)
+      as_root yum makecache -y
+      ;;
+    zypper)
+      as_root zypper --non-interactive refresh
+      ;;
+    pacman)
+      as_root pacman -Sy --noconfirm
+      ;;
+  esac
+}
+
+install_packages() {
+  detect_pkg_manager
+  case "$PKG_MANAGER" in
+    apt)
+      DEBIAN_FRONTEND=noninteractive as_root apt-get install -y --no-install-recommends "$@"
+      ;;
+    dnf)
+      as_root dnf install -y "$@"
+      ;;
+    yum)
+      as_root yum install -y "$@"
+      ;;
+    zypper)
+      as_root zypper --non-interactive install -y "$@"
+      ;;
+    pacman)
+      as_root pacman -S --noconfirm --needed "$@"
+      ;;
+  esac
+}
+
+docker_compose_available() {
+  if have_command docker && as_root docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  if have_command docker-compose; then
+    return 0
+  fi
+  return 1
+}
+
+docker_compose_run() {
+  if have_command docker && as_root docker compose version >/dev/null 2>&1; then
+    as_root docker compose -f "$COMPOSE_FILE" "$@"
+    return
+  fi
+  if have_command docker-compose; then
+    as_root docker-compose -f "$COMPOSE_FILE" "$@"
+    return
+  fi
+  echo "错误：未检测到 Docker Compose。"
+  exit 1
+}
+
+docker_engine_ready() {
+  if ! have_command docker; then
+    return 1
+  fi
+  as_root docker version >/dev/null 2>&1
+}
+
+node_major_installed() {
+  if ! have_command node; then
+    echo 0
+    return
+  fi
+  node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || echo 0
+}
+
+dependencies_missing() {
+  local missing=0
+  for cmd in curl git node npm docker; do
+    if ! have_command "$cmd"; then
+      missing=1
+    fi
+  done
+  if ! docker_compose_available; then
+    missing=1
+  fi
+  if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
+    missing=1
+  fi
+  if ! have_command pm2; then
+    missing=1
+  fi
+  if [[ "$missing" -eq 1 ]]; then
+    return 0
+  fi
+  return 1
+}
+
+wait_for_container_health() {
+  local name="$1"
+  local timeout_seconds="${2:-120}"
+  local waited=0
+  while [[ "$waited" -lt "$timeout_seconds" ]]; do
+    local state
+    state="$(as_root docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$name" 2>/dev/null || true)"
+    if [[ "$state" == "healthy" || "$state" == "running" ]]; then
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo "错误：容器 $name 在 ${timeout_seconds}s 内未就绪。"
+  exit 1
+}
+
+ensure_runtime_data_dirs() {
+  local config_dir="$API_DIR/config"
+  local runtime_file="$config_dir/runtime-config.json"
+  local runtime_example="$config_dir/runtime-config.example.json"
+  local log_dir="$API_DIR/logs"
+
+  mkdir -p "$config_dir" "$log_dir"
+  if [[ ! -f "$runtime_file" ]]; then
+    if [[ -f "$runtime_example" ]]; then
+      cp "$runtime_example" "$runtime_file"
+    else
+      printf "{}\n" > "$runtime_file"
+    fi
+    echo "已创建运行时配置：$runtime_file"
+  fi
+}
+
+ensure_api_env() {
+  if [[ -f "$API_DIR/.env" ]]; then
+    return
+  fi
+  if [[ -f "$API_DIR/.env.example" ]]; then
+    cp "$API_DIR/.env.example" "$API_DIR/.env"
+    echo "已创建 API 环境文件：$API_DIR/.env"
+    return
+  fi
+  if [[ -f "$ROOT_DIR/.env.example" ]]; then
+    cp "$ROOT_DIR/.env.example" "$API_DIR/.env"
+    echo "已从根目录模板创建 API 环境文件：$API_DIR/.env"
+  fi
+}
+
+install_base_tools() {
+  echo "[安装 1/5] 安装基础工具"
+  refresh_package_index
+  case "$PKG_MANAGER" in
+    apt)
+      install_packages ca-certificates curl git gnupg lsb-release tar xz-utils
+      ;;
+    dnf|yum)
+      install_packages ca-certificates curl git tar xz
+      ;;
+    zypper|pacman)
+      install_packages ca-certificates curl git tar xz
+      ;;
+  esac
+}
+
+install_docker_compose_if_needed() {
+  if docker_compose_available; then
+    return
+  fi
+  echo "安装 Docker Compose 插件"
+  case "$PKG_MANAGER" in
+    apt|dnf|yum)
+      install_packages docker-compose-plugin || true
+      ;;
+    zypper|pacman)
+      install_packages docker-compose || true
+      ;;
+  esac
+}
+
+install_docker() {
+  echo "[安装 2/5] 安装 Docker"
+  if ! have_command docker; then
+    have_command curl || { echo "错误：缺少 curl，无法安装 Docker。"; exit 1; }
+    as_root sh -c "curl -fsSL https://get.docker.com | sh"
+  fi
+
+  if have_command systemctl; then
+    as_root systemctl enable --now docker || as_root systemctl restart docker || true
+  fi
+
+  if ! docker_engine_ready; then
+    echo "错误：Docker 已安装但引擎不可用。"
+    exit 1
+  fi
+
+  install_docker_compose_if_needed
+  if ! docker_compose_available; then
+    echo "错误：Docker Compose 不可用。"
+    exit 1
+  fi
+}
+
+install_nodejs() {
+  echo "[安装 3/5] 安装 Node.js 与 npm"
+  if have_command node && have_command npm && [[ "$(node_major_installed)" -ge "$NODE_MAJOR" ]]; then
+    echo "Node.js 已满足要求：$(node -v)"
+    return
+  fi
+
+  case "$PKG_MANAGER" in
+    apt)
+      as_root bash -lc "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -"
+      install_packages nodejs
+      ;;
+    dnf|yum)
+      as_root bash -lc "curl -fsSL https://rpm.nodesource.com/setup_${NODE_MAJOR}.x | bash -"
+      install_packages nodejs
+      ;;
+    zypper)
+      install_packages nodejs npm || install_packages nodejs20 npm20 || true
+      ;;
+    pacman)
+      install_packages nodejs npm
+      ;;
+  esac
+
+  have_command node || { echo "错误：Node.js 安装失败。"; exit 1; }
+  have_command npm || { echo "错误：npm 安装失败。"; exit 1; }
+}
+
+install_pm2() {
+  echo "[安装 4/5] 安装 pm2"
+  if have_command pm2; then
+    echo "pm2 已安装"
+    return
+  fi
+  if [[ "$(id -u)" -eq 0 ]]; then
+    npm install -g pm2
+  else
+    as_root npm install -g pm2 || npm install -g pm2
+  fi
+}
+
+install_mw_command() {
+  echo "[安装 5/5] 注册 mw 命令"
+  as_root chmod +x "$ROOT_DIR/mw" "$ROOT_DIR/scripts/mw-linux.sh"
+  as_root ln -sf "$ROOT_DIR/mw" /usr/local/bin/mw
+
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    as_root usermod -aG docker "$SUDO_USER" || true
+  fi
+}
+
+run_install() {
+  require_root_capability
+  detect_pkg_manager
+  echo "MindWall 环境安装 v$(get_project_version)"
+  echo "目录：$ROOT_DIR"
+  echo
+
+  install_base_tools
+  install_docker
+  install_nodejs
+  install_pm2
+  install_mw_command
+
+  echo
+  echo "安装完成。"
+  echo "如需非 root 直接执行 docker，请重新登录终端。"
+}
+
+run_deploy() {
+  echo "MindWall 部署更新 v$(get_project_version)"
+  echo "目录：$ROOT_DIR"
+  echo
+
+  if dependencies_missing; then
+    echo "检测到依赖缺失，先执行安装。"
+    run_install
+  fi
+
+  if [[ "$NO_DOCKER" != "1" ]] && ! docker_engine_ready; then
+    if have_command systemctl; then
+      require_root_capability
+      as_root systemctl enable --now docker || as_root systemctl restart docker || true
+    fi
+    if ! docker_engine_ready; then
+      echo "Docker 引擎不可用，尝试重装依赖。"
+      run_install
+    fi
+  fi
+
+  echo "[1/8] 更新代码"
+  cd "$ROOT_DIR"
+  if [[ "$SKIP_GIT" != "1" ]]; then
+    have_command git || { echo "错误：缺少 git。"; exit 1; }
+    git fetch origin "$BRANCH"
+    git checkout "$BRANCH"
+    git pull --ff-only origin "$BRANCH"
+  else
+    echo "已跳过 Git 拉取。"
+  fi
+
+  echo "[2/8] 启动 PostgreSQL + Redis"
+  if [[ "$NO_DOCKER" != "1" ]]; then
+    docker_compose_run up -d
+    wait_for_container_health "mindwall-postgres" 180
+    wait_for_container_health "mindwall-redis" 90
+  else
+    echo "已跳过 Docker 步骤。"
+  fi
+
+  echo "[3/8] 校验运行时目录"
+  ensure_runtime_data_dirs
+  ensure_api_env
+
+  if [[ "$SKIP_INSTALL" != "1" ]]; then
+    echo "[4/8] 安装 API 依赖"
+    cd "$API_DIR"
+    npm ci
+
+    echo "[5/8] 安装 Web 依赖"
+    cd "$WEB_DIR"
+    npm ci
+  else
+    echo "[4/8] 已跳过 API 依赖安装"
+    echo "[5/8] 已跳过 Web 依赖安装"
+  fi
+
+  echo "[6/8] Prisma 生成与迁移"
+  cd "$API_DIR"
+  npm run prisma:generate
+  if [[ "$SKIP_MIGRATE" != "1" ]]; then
+    npm run prisma:deploy
+  else
+    echo "已跳过 Prisma 迁移。"
+  fi
+
+  echo "[7/8] 构建 API + Web"
+  npm run build
+  cd "$WEB_DIR"
+  npm run build
+
+  echo "[8/8] 重启服务"
+  if ! have_command pm2; then
+    install_pm2
+  fi
+
+  if have_command pm2; then
+    pm2 describe mindwall-api >/dev/null 2>&1 || pm2 start npm --name mindwall-api --cwd "$API_DIR" -- run start:prod
+    pm2 restart mindwall-api --update-env
+
+    pm2 describe mindwall-web >/dev/null 2>&1 || pm2 start npm --name mindwall-web --cwd "$WEB_DIR" -- start -- --host 0.0.0.0 --port "$WEB_PORT"
+    pm2 restart mindwall-web --update-env
+    pm2 save
+
+    echo "部署完成。"
+    echo "Web: http://服务器IP:$WEB_PORT"
+  else
+    echo "未检测到 pm2，请手动启动："
+    echo "API: cd $API_DIR && npm run start:prod"
+    echo "Web: cd $WEB_DIR && npm start -- --host 0.0.0.0 --port $WEB_PORT"
+  fi
+}
+
+run_status() {
+  echo "=== MindWall 状态 ==="
+  echo
+  echo "[Docker]"
+  if have_command docker; then
+    as_root docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | sed -n '1p;/mindwall/p'
+  else
+    echo "未安装 Docker"
+  fi
+
+  echo
+  echo "[PM2]"
+  if have_command pm2; then
+    pm2 list
+  else
+    echo "未安装 pm2"
+  fi
+}
+
+run_auto() {
+  if dependencies_missing; then
+    echo "检测到服务器依赖不完整，将先安装再部署。"
+    run_install
+    run_deploy
+    return
+  fi
+
+  local reinstall="n"
+  if [[ "$YES" != "1" ]]; then
+    read -r -p "检测到依赖已存在，是否重新安装依赖？[y/N]: " reinstall
+  fi
+
+  case "${reinstall,,}" in
+    y|yes)
+      run_install
+      ;;
+    *)
+      echo "已跳过依赖重装。"
+      ;;
+  esac
+
+  run_deploy
+}
+
+run_menu() {
+  while true; do
+    echo
+    echo "=============================="
+    echo "MindWall v$(get_project_version)"
+    echo "目录: $ROOT_DIR"
+    echo "=============================="
+    echo "1) 自动识别（安装/更新）"
+    echo "2) 仅安装依赖"
+    echo "3) 仅更新部署"
+    echo "4) 查看状态"
+    echo "5) 退出"
+    read -r -p "请选择 [1-5]: " choice
+
+    case "$choice" in
+      1) run_auto ;;
+      2) run_install ;;
+      3) run_deploy ;;
+      4) run_status ;;
+      5) return ;;
+      *) echo "输入无效，请重试。" ;;
+    esac
+  done
+}
+
+case "$COMMAND" in
+  auto)
+    run_auto
+    ;;
+  install)
+    run_install
+    ;;
+  update|deploy)
+    run_deploy
+    ;;
+  status)
+    run_status
+    ;;
+  menu)
+    run_menu
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "未知命令：$COMMAND"
+    usage
+    exit 1
+    ;;
+esac

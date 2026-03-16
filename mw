@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SELF="$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")"
+fi
+
+ROOT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+exec bash "$ROOT_DIR/scripts/mw-linux.sh" "$@"
