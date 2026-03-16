@@ -85,6 +85,44 @@ as_root() {
   if [[ -n "$SUDO" ]]; then "$SUDO" "$@"; else "$@"; fi
 }
 
+port_in_use() {
+  local port="$1"
+  if have_command ss; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ":${port}$" && return 0
+    return 1
+  fi
+  if have_command netstat; then
+    netstat -lnt 2>/dev/null | awk '{print $4}' | grep -Eq ":${port}$" && return 0
+    return 1
+  fi
+  if have_command lsof; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  return 1
+}
+
+# 若 API 端口被其他（非本项目）进程占用，自动找下一个空闲端口
+# 绝不会动到服务器上其他项目的端口
+check_api_port() {
+  if ! port_in_use "$API_PORT"; then return; fi
+
+  # 如果是我们自己的服务在跑，复用同一端口即可
+  if have_command systemctl && systemctl is-active --quiet mindwall-api 2>/dev/null; then
+    return
+  fi
+
+  local orig="$API_PORT"
+  local p="$orig"
+  while port_in_use "$p"; do
+    p=$((p + 1))
+    [[ "$p" -gt 65000 ]] && die "找不到可用的 API 端口（从 $orig 开始已搜索到 $p）"
+  done
+  warn "API 端口 $orig 被其他进程占用，自动改用 $p（其他服务未受影响）。"
+  API_PORT="$p"
+  API_PORT_SET=0   # 允许后续 load_saved_ports 覆盖，避免循环漂移
+}
+
 die()  { echo "错误: $*" >&2; exit 1; }
 warn() { echo "警告: $*" >&2; }
 
@@ -676,16 +714,26 @@ NGINXEOF
   # Debian/Ubuntu 的 sites-available/sites-enabled 布局
   if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
     ln -sf "$conf_file" "/etc/nginx/sites-enabled/mindwall.conf"
-    rm -f  "/etc/nginx/sites-enabled/default"
+    # 注意：不删除 default，服务器上可能有其他项目使用 default 站点
   fi
 
-  # 禁用 RPM 系默认站点（避免端口冲突）
-  [[ -f /etc/nginx/conf.d/default.conf ]] && \
-    mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
+  # RPM 系：仅当 default.conf 是 nginx 原始占位文件时才禁用（保护其他项目）
+  if [[ -f /etc/nginx/conf.d/default.conf ]]; then
+    if grep -q 'Welcome to nginx' /etc/nginx/conf.d/default.conf 2>/dev/null; then
+      mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.disabled 2>/dev/null || true
+    else
+      warn "/etc/nginx/conf.d/default.conf 看起来是自定义配置，已跳过，请手动确认端口冲突。"
+    fi
+  fi
 
-  nginx -t             || die "nginx 配置测试失败，请检查 $conf_file"
-  as_root systemctl enable  nginx
-  as_root systemctl restart nginx
+  nginx -t || die "nginx 配置测试失败，请检查 $conf_file"
+  as_root systemctl enable nginx
+  # 已运行则 reload（零停机），否则 start
+  if as_root systemctl is-active --quiet nginx 2>/dev/null; then
+    as_root systemctl reload nginx
+  else
+    as_root systemctl start nginx
+  fi
   echo "  nginx 已启动，静态文件根目录: $web_dist"
 }
 
@@ -757,6 +805,7 @@ main() {
 
   load_saved_ports
   validate_port "$API_PORT" || die "API 端口不合法: $API_PORT"
+  check_api_port
 
   cd "$ROOT_DIR"
   echo "MindWall 首次部署 v$(project_version)"
