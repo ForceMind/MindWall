@@ -1,12 +1,25 @@
-param(
+﻿param(
   [string]$Branch = "main",
-  [int]$WebPort = 3001
+  [int]$WebPort = 3001,
+  [switch]$SkipGit,
+  [switch]$SkipInstall,
+  [switch]$SkipMigrate,
+  [switch]$NoDocker
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+try {
+  $rawUi = $Host.UI.RawUI
+  if ($rawUi) {
+    $rawUi.WindowTitle = "MindWall 服务器部署更新"
+  }
+} catch {
+}
 
 trap {
-  Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-Host "部署失败：$($_.Exception.Message)" -ForegroundColor Red
   exit 1
 }
 
@@ -14,11 +27,12 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ApiDir = Join-Path $Root "apps/api"
 $WebDir = Join-Path $Root "apps/web"
 $ComposeFile = Join-Path $Root "infra/docker-compose.yml"
+$VersionFile = Join-Path $Root "VERSION"
 
 function Require-Command {
   param([string]$Name)
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-    throw "Missing command: $Name"
+    throw "缺少命令：$Name，请先安装并加入 PATH。"
   }
 }
 
@@ -29,13 +43,23 @@ function Assert-LastExitCode {
   }
 }
 
+function Get-ProjectVersion {
+  if (Test-Path $VersionFile) {
+    $versionText = (Get-Content -Raw $VersionFile).Trim()
+    if ($versionText -match '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+      return $versionText
+    }
+  }
+  return "1.0.0"
+}
+
 function Ensure-DockerEngine {
   try {
     docker version --format '{{.Server.Version}}' 1>$null 2>$null
   } catch {
   }
   if ($LASTEXITCODE -ne 0) {
-    throw "Docker engine is not running. Start Docker first, then rerun scripts/deploy-update.ps1."
+    throw "Docker 引擎未运行，请先启动 Docker 后重试。"
   }
 }
 
@@ -52,60 +76,116 @@ function Wait-ForDockerHealth {
     } catch {
       $status = $null
     }
+
     if ($LASTEXITCODE -eq 0 -and ($status -eq "healthy" -or $status -eq "running")) {
       return
     }
+
     Start-Sleep -Seconds 2
   }
 
-  throw "Container '$ContainerName' did not become ready within $TimeoutSeconds seconds."
+  throw "容器 '$ContainerName' 在 $TimeoutSeconds 秒内未就绪。"
 }
 
-Require-Command "git"
-Require-Command "docker"
+function Ensure-RuntimeDataDirectories {
+  $apiConfigDir = Join-Path $ApiDir "config"
+  $runtimeConfigFile = Join-Path $apiConfigDir "runtime-config.json"
+  $runtimeConfigExample = Join-Path $apiConfigDir "runtime-config.example.json"
+  $apiLogDir = Join-Path $ApiDir "logs"
+
+  New-Item -ItemType Directory -Path $apiConfigDir -Force | Out-Null
+  New-Item -ItemType Directory -Path $apiLogDir -Force | Out-Null
+
+  if (-not (Test-Path $runtimeConfigFile)) {
+    if (Test-Path $runtimeConfigExample) {
+      Copy-Item -Path $runtimeConfigExample -Destination $runtimeConfigFile -Force
+    } else {
+      Set-Content -Path $runtimeConfigFile -Value "{`n}`n" -Encoding UTF8
+    }
+    Write-Host "已创建运行时配置文件：$runtimeConfigFile"
+  } else {
+    Write-Host "保留现有运行时配置：$runtimeConfigFile"
+  }
+}
+
+$version = Get-ProjectVersion
+
 Require-Command "npm"
-Ensure-DockerEngine
-
-Write-Host "[1/7] Updating code on branch: $Branch"
-Set-Location $Root
-git fetch origin $Branch
-Assert-LastExitCode "git fetch failed."
-git checkout $Branch
-Assert-LastExitCode "git checkout failed."
-git pull --ff-only origin $Branch
-Assert-LastExitCode "git pull failed."
-
-Write-Host "[2/7] Starting/updating infrastructure containers"
-try {
-  docker compose -f $ComposeFile up -d
-} catch {
+if (-not $SkipGit) {
+  Require-Command "git"
 }
-Assert-LastExitCode "Failed to start Docker containers. Verify Docker is running and retry."
-Wait-ForDockerHealth -ContainerName "mindwall-postgres"
+if (-not $NoDocker) {
+  Require-Command "docker"
+  Ensure-DockerEngine
+}
 
-Write-Host "[3/7] Installing API dependencies"
+Write-Host "MindWall 商业版部署脚本 v$version"
+Write-Host "工作目录：$Root"
+Write-Host ""
+
+Write-Host "[1/8] 更新代码"
+Set-Location $Root
+if (-not $SkipGit) {
+  git fetch origin $Branch
+  Assert-LastExitCode "git fetch 失败。"
+  git checkout $Branch
+  Assert-LastExitCode "git checkout 失败。"
+  git pull --ff-only origin $Branch
+  Assert-LastExitCode "git pull 失败。"
+} else {
+  Write-Host "已跳过 Git 拉取（使用当前代码目录）。"
+}
+
+Write-Host "[2/8] 启动基础设施"
+if (-not $NoDocker) {
+  try {
+    docker compose -f $ComposeFile up -d
+  } catch {
+  }
+  Assert-LastExitCode "Docker 基础设施启动失败。"
+  Wait-ForDockerHealth -ContainerName "mindwall-postgres"
+  Write-Host "PostgreSQL 容器已就绪。"
+} else {
+  Write-Host "已跳过 Docker 步骤。"
+}
+
+Write-Host "[3/8] 校验运行时数据目录（不会同步本地数据）"
+Ensure-RuntimeDataDirectories
+
+if (-not $SkipInstall) {
+  Write-Host "[4/8] 安装 API 依赖"
+  Set-Location $ApiDir
+  npm ci
+  Assert-LastExitCode "API 依赖安装失败。"
+
+  Write-Host "[5/8] 安装 Web 依赖"
+  Set-Location $WebDir
+  npm ci
+  Assert-LastExitCode "Web 依赖安装失败。"
+} else {
+  Write-Host "[4/8] 已跳过 API 依赖安装"
+  Write-Host "[5/8] 已跳过 Web 依赖安装"
+}
+
+Write-Host "[6/8] 生成 Prisma Client 并执行迁移"
 Set-Location $ApiDir
-npm ci
-Assert-LastExitCode "API dependency installation failed."
-
-Write-Host "[4/7] Running Prisma generate + migrate deploy"
 npm run prisma:generate
-Assert-LastExitCode "Prisma client generation failed."
-npm run prisma:deploy
-Assert-LastExitCode "Prisma migration deploy failed."
+Assert-LastExitCode "Prisma Client 生成失败。"
+if (-not $SkipMigrate) {
+  npm run prisma:deploy
+  Assert-LastExitCode "Prisma 迁移执行失败。"
+} else {
+  Write-Host "已跳过数据库迁移。"
+}
 
-Write-Host "[5/7] Building API"
+Write-Host "[7/8] 构建 API + Web"
 npm run build
-Assert-LastExitCode "API build failed."
-
-Write-Host "[6/7] Installing and building Web"
+Assert-LastExitCode "API 构建失败。"
 Set-Location $WebDir
-npm ci
-Assert-LastExitCode "Web dependency installation failed."
 npm run build
-Assert-LastExitCode "Web build failed."
+Assert-LastExitCode "Web 构建失败。"
 
-Write-Host "[7/7] Restarting app services"
+Write-Host "[8/8] 重启线上进程"
 if (Get-Command pm2 -ErrorAction SilentlyContinue) {
   pm2 describe mindwall-api | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -119,10 +199,12 @@ if (Get-Command pm2 -ErrorAction SilentlyContinue) {
   }
   pm2 restart mindwall-web --update-env | Out-Null
   pm2 save | Out-Null
-  Write-Host "Deploy complete. Services restarted by pm2."
+
+  Write-Host "部署完成：pm2 已重启服务。"
+  Write-Host "Web 访问地址：http://服务器IP:$WebPort"
 } else {
-  Write-Host "pm2 not found. Code, migration and build are complete."
-  Write-Host "Please restart services manually:"
-  Write-Host "API: cd $ApiDir; npm run start:prod"
-  Write-Host "Web: cd $WebDir; npm start -- --host 0.0.0.0 --port $WebPort"
+  Write-Host "未检测到 pm2，已完成代码更新、迁移和构建。"
+  Write-Host "请手动启动："
+  Write-Host "API：cd $ApiDir; npm run start:prod"
+  Write-Host "Web：cd $WebDir; npm start -- --host 0.0.0.0 --port $WebPort"
 }

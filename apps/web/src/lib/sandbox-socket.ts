@@ -24,8 +24,8 @@ export class SandboxSocket {
     this.socket = new WebSocket(buildSocketUrl());
 
     this.socket.addEventListener('open', () => {
-      this.flushQueue();
       this.send({ type: 'auth', user_id: userId });
+      this.flushQueue();
     });
 
     this.socket.addEventListener('message', (event) => {

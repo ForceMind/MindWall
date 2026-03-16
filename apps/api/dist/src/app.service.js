@@ -8,12 +8,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppService = void 0;
 const common_1 = require("@nestjs/common");
+const app_version_1 = require("./system/foundation/app-version");
 let AppService = class AppService {
     getServiceInfo() {
+        const version = (0, app_version_1.getAppVersion)();
         return {
             name: 'MindWall API',
             status: 'running',
-            version: process.env.npm_package_version || '0.0.1',
+            version,
             time: new Date().toISOString(),
             endpoints: {
                 health: '/health',

@@ -17,14 +17,15 @@
 
 ## 四、发布层（交付流程）
 1. 本地自测：`scripts/start-local.cmd`
-2. 构建验证：`apps/api npm run build` + `apps/web npm run build`
-3. 服务器更新：`scripts/deploy-update.ps1`
+2. 生成最小发布包：`scripts/build-release.cmd`
+3. 服务器部署：`scripts/deploy-update.ps1 -SkipGit`
 4. 回归检查：
    - 用户注册/登录
    - 新手访谈 4 轮
    - 匹配列表进入会话
    - 后台配置测试接口
    - 后台日志与 AI 记录查看
+5. 版本变更：`scripts/set-version.cmd x.y.z`
 
 ## 五、当前待办（下一迭代）
 - 引入全链路自动化测试（Auth/Onboarding/Chat/Admin）

@@ -12,12 +12,15 @@ export declare class AdminConfigService {
         openai_base_url: string;
         openai_api_key_configured: boolean;
         openai_api_key_preview: string | null;
+        openai_embedding_api_key_configured: boolean;
+        openai_embedding_api_key_preview: string | null;
         openai_model: string;
         openai_embedding_model: string;
         web_origin: string;
         source: {
             openai_base_url: string;
             openai_api_key: string;
+            openai_embedding_api_key: string;
             openai_model: string;
             openai_embedding_model: string;
             web_origin: string;
@@ -29,12 +32,15 @@ export declare class AdminConfigService {
         openai_base_url: string;
         openai_api_key_configured: boolean;
         openai_api_key_preview: string | null;
+        openai_embedding_api_key_configured: boolean;
+        openai_embedding_api_key_preview: string | null;
         openai_model: string;
         openai_embedding_model: string;
         web_origin: string;
         source: {
             openai_base_url: string;
             openai_api_key: string;
+            openai_embedding_api_key: string;
             openai_model: string;
             openai_embedding_model: string;
             web_origin: string;
@@ -67,5 +73,9 @@ export declare class AdminConfigService {
     private readRuntimeConfig;
     private writeRuntimeConfig;
     private normalizeBaseUrl;
+    getChatCompletionsUrl(baseUrl: string): string;
+    getEmbeddingsUrl(baseUrl: string): string;
+    private resolveEndpoint;
     private clipError;
+    private previewApiKey;
 }

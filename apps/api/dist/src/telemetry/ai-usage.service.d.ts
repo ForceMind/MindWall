@@ -40,6 +40,13 @@ export declare class AiUsageService {
         page: number;
         limit: number;
         total: number;
+        summary: {
+            total_input_tokens: number;
+            total_output_tokens: number;
+            total_tokens: number;
+            total_estimated_cost_usd: number;
+            unique_user_count: number;
+        };
         records: {
             estimated_cost_usd: number;
             user_id: string | null;

@@ -1,5 +1,6 @@
-﻿import { Controller, Get } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { getAppVersion } from '../../foundation/app-version';
 
 @Controller('health')
 export class HealthController {
@@ -17,6 +18,7 @@ export class HealthController {
     return {
       status: db === 'up' ? 'ok' : 'degraded',
       time: new Date().toISOString(),
+      version: getAppVersion(),
       services: {
         api: 'up',
         db,

@@ -107,7 +107,7 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleInboundEvent(clientId: string, payload: unknown) {
     const event = payload as InboundEvent;
     if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
-      this.send(clientId, { type: 'error', message: 'Unknown event payload.' });
+      this.send(clientId, { type: 'error', message: '无法识别的消息格式。' });
       return;
     }
 
@@ -151,25 +151,25 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    this.send(clientId, { type: 'error', message: 'Unsupported event type.' });
+    this.send(clientId, { type: 'error', message: '不支持的事件类型。' });
   }
 
   private async handleAuth(clientId: string, event: AuthEvent) {
     const userId = event.user_id?.trim();
     if (!userId) {
-      this.send(clientId, { type: 'error', message: 'user_id is required for auth.' });
+      this.send(clientId, { type: 'error', message: '鉴权失败：缺少用户 ID。' });
       return;
     }
 
     const exists = await this.sandboxService.ensureUserExists(userId);
     if (!exists) {
-      this.send(clientId, { type: 'error', message: 'User not found.' });
+      this.send(clientId, { type: 'error', message: '鉴权失败：用户不存在。' });
       return;
     }
 
     const state = this.connections.get(clientId);
     if (!state) {
-      this.send(clientId, { type: 'error', message: 'Connection not found.' });
+      this.send(clientId, { type: 'error', message: '连接状态异常，请重新连接。' });
       return;
     }
 
@@ -190,13 +190,13 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleJoinMatch(clientId: string, event: JoinMatchEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim();
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
 
@@ -222,13 +222,13 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleFetchHistory(clientId: string, event: FetchHistoryEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim() || state.matchId || '';
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
 
@@ -249,13 +249,13 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleWallState(clientId: string, event: WallStateEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim() || state.matchId || '';
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
 
@@ -278,13 +278,13 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleWallBreakDecision(clientId: string, event: WallDecisionEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim() || state.matchId || '';
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
     const accept = event.accept === true;
@@ -335,18 +335,18 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleSandboxMessage(clientId: string, event: SandboxMessageEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim() || state.matchId || '';
     const text = event.text?.trim() || '';
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
     if (!text) {
-      this.send(clientId, { type: 'error', message: 'text is required.' });
+      this.send(clientId, { type: 'error', message: '消息内容不能为空。' });
       return;
     }
 
@@ -414,7 +414,7 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
       const payload = {
         type: 'wall_ready',
         match_id: result.matchId,
-        prompt: 'Ready to break the wall?',
+        prompt: '你们已达到破壁条件，是否进入直聊？',
         resonance_score: result.resonanceScore,
       };
       this.sendToUser(result.senderId, payload);
@@ -425,18 +425,18 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   private async handleDirectMessage(clientId: string, event: DirectMessageEvent) {
     const state = this.connections.get(clientId);
     if (!state?.userId) {
-      this.send(clientId, { type: 'error', message: 'Authenticate first.' });
+      this.send(clientId, { type: 'error', message: '请先完成登录鉴权。' });
       return;
     }
 
     const matchId = event.match_id?.trim() || state.matchId || '';
     const text = event.text?.trim() || '';
     if (!matchId) {
-      this.send(clientId, { type: 'error', message: 'match_id is required.' });
+      this.send(clientId, { type: 'error', message: '缺少会话 ID。' });
       return;
     }
     if (!text) {
-      this.send(clientId, { type: 'error', message: 'text is required.' });
+      this.send(clientId, { type: 'error', message: '消息内容不能为空。' });
       return;
     }
 

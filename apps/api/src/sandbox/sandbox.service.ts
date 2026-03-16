@@ -150,11 +150,11 @@ export class SandboxService {
       },
     });
     if (!match) {
-      throw new NotFoundException('Match not found.');
+      throw new NotFoundException('会话不存在。');
     }
 
     if (userId && userId !== match.user_a_id && userId !== match.user_b_id) {
-      throw new ForbiddenException('User cannot access this match.');
+      throw new ForbiddenException('你无权访问该会话。');
     }
 
     const rows = await this.prisma.sandboxMessage.findMany({
@@ -198,11 +198,11 @@ export class SandboxService {
     const info = await this.getMatchParticipantInfo(input.matchId, input.userId);
 
     if (info.status === MatchStatus.rejected) {
-      throw new BadRequestException('This match is rejected.');
+      throw new BadRequestException('该会话已被拒绝。');
     }
 
     if (info.status !== MatchStatus.wall_broken && info.resonanceScore < 100) {
-      throw new BadRequestException('Wall break is not ready until resonance reaches 100.');
+      throw new BadRequestException('共鸣值达到 100 后才可发起破壁。');
     }
 
     if (info.status === MatchStatus.wall_broken) {
@@ -258,20 +258,20 @@ export class SandboxService {
   async processMessage(input: ProcessMessageInput): Promise<ProcessMessageResult> {
     const text = input.text.trim();
     if (!text) {
-      throw new BadRequestException('text is required.');
+      throw new BadRequestException('消息内容不能为空。');
     }
     if (text.length > 4000) {
-      throw new BadRequestException('text is too long.');
+      throw new BadRequestException('消息过长，请控制在 4000 字以内。');
     }
 
     const participant = await this.getMatchParticipantInfo(input.matchId, input.senderId);
     if (participant.status === MatchStatus.wall_broken) {
       throw new BadRequestException(
-        'This match already broke the wall and should use direct_message.',
+        '该会话已破壁，请切换为直聊发送。',
       );
     }
     if (participant.status === MatchStatus.rejected) {
-      throw new BadRequestException('This match is rejected.');
+      throw new BadRequestException('该会话已被拒绝。');
     }
 
     const [senderTags, receiverTags] = await Promise.all([
@@ -372,15 +372,15 @@ export class SandboxService {
   ): Promise<DirectMessageResult> {
     const text = input.text.trim();
     if (!text) {
-      throw new BadRequestException('text is required.');
+      throw new BadRequestException('消息内容不能为空。');
     }
     if (text.length > 4000) {
-      throw new BadRequestException('text is too long.');
+      throw new BadRequestException('消息过长，请控制在 4000 字以内。');
     }
 
     const participant = await this.getMatchParticipantInfo(input.matchId, input.senderId);
     if (participant.status !== MatchStatus.wall_broken) {
-      throw new BadRequestException('Direct chat is available only after wall is broken.');
+      throw new BadRequestException('仅在破壁后才可使用直聊。');
     }
 
     const message = await this.prisma.sandboxMessage.create({
@@ -496,10 +496,10 @@ export class SandboxService {
       },
     });
     if (!match) {
-      throw new NotFoundException('Match not found.');
+      throw new NotFoundException('会话不存在。');
     }
     if (senderId !== match.user_a_id && senderId !== match.user_b_id) {
-      throw new ForbiddenException('Sender is not part of this match.');
+      throw new ForbiddenException('当前用户不在该会话中。');
     }
 
     return {
@@ -637,7 +637,7 @@ export class SandboxService {
       aiAction: action,
       rewrittenText: rewrittenText.slice(0, 2000),
       hiddenTagUpdates: input.hiddenTagUpdates || {},
-      reason: (input.reason || 'safety middleware decision').slice(0, 220),
+      reason: (input.reason || '安全中间层判定').slice(0, 220),
     };
   }
 
@@ -796,7 +796,9 @@ export class SandboxService {
     const model = aiConfig.openaiModel;
 
     try {
-      const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+      const response = await fetch(
+        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -818,7 +820,8 @@ export class SandboxService {
             },
           ],
         }),
-      });
+        },
+      );
 
       if (!response.ok) {
         const detail = await response.text();

@@ -460,7 +460,7 @@ let MatchEngineService = MatchEngineService_1 = class MatchEngineService {
         }
         const model = aiConfig.openaiModel;
         try {
-            const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+            const response = await fetch(this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

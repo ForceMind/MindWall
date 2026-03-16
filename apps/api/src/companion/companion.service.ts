@@ -267,7 +267,9 @@ export class CompanionService {
     }
 
     try {
-      const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+      const response = await fetch(
+        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -288,7 +290,8 @@ export class CompanionService {
             },
           ],
         }),
-      });
+        },
+      );
 
       if (!response.ok) {
         const detail = await response.text();

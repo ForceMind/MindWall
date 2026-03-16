@@ -5,6 +5,7 @@ export declare class HealthController {
     health(): Promise<{
         status: string;
         time: string;
+        version: string;
         services: {
             api: string;
             db: string;

@@ -60,6 +60,30 @@ function aiHistoryKey() {
   return `mindwall.ai.chat.${id.value}`;
 }
 
+function localizeRealtimeError(input: unknown) {
+  const message = String(input || '').trim();
+  if (!message) {
+    return '聊天连接异常，请稍后重试。';
+  }
+
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('authenticate first') ||
+    lower.includes('请先完成登录鉴权') ||
+    lower.includes('auth') ||
+    lower.includes('鉴权')
+  ) {
+    return '当前聊天会话鉴权异常，请返回会话列表后重新进入。';
+  }
+  if (lower.includes('match_id is required') || lower.includes('缺少会话 id')) {
+    return '会话参数异常，请返回列表后重试。';
+  }
+  if (lower.includes('connection') || lower.includes('连接')) {
+    return '聊天连接状态异常，请稍后重试。';
+  }
+  return message;
+}
+
 function resetState() {
   pageError.value = '';
   inputText.value = '';
@@ -174,7 +198,11 @@ function buildCompanionHistory() {
 function handleSocketEvent(event: SandboxInbound) {
   const type = String(event.type || '');
 
-  if (type === 'connected' || type === 'auth_ok') {
+  if (type === 'connected') {
+    return;
+  }
+
+  if (type === 'auth_ok') {
     if (socketRef.value && id.value) {
       socketRef.value.joinMatch(id.value);
       socketRef.value.fetchHistory(id.value, 100);
@@ -245,7 +273,12 @@ function handleSocketEvent(event: SandboxInbound) {
   }
 
   if (type === 'error') {
-    pageError.value = String(event.message || '聊天连接异常。');
+    pageError.value = localizeRealtimeError(event.message);
+    return;
+  }
+
+  if (type === 'closed') {
+    pageError.value = '聊天连接已断开，请稍后重试。';
   }
 }
 
@@ -285,9 +318,10 @@ async function initMatchChat() {
     socketRef.value = socket;
     unregisterSocket.value = socket.onEvent(handleSocketEvent);
     socket.connect(myUserId);
-    socket.joinMatch(id.value);
-    socket.fetchHistory(id.value, 100);
-    socket.fetchWallState(id.value);
+
+    if (history.messages.length === 0) {
+      addSystemMessage('你已进入沙盒会话，发送第一句话吧。', 'enter');
+    }
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -440,7 +474,8 @@ onBeforeUnmount(() => {
         <div class="composer">
           <textarea
             v-model="inputText"
-            class="textarea"
+            class="textarea chat-input"
+            rows="1"
             placeholder="输入消息，回车发送"
             :disabled="loading || sending"
             @keydown.enter.exact.prevent="sendMessage"

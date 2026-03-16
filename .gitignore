@@ -1,0 +1,22 @@
+# --- Global ---
+.env
+.env.*
+!.env.example
+!apps/api/.env.example
+!apps/web/.env.local.example
+*.log
+release/
+
+# --- Local editor / OS ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Node ---
+**/node_modules/
+**/dist/
+
+# --- Runtime data (never deploy from local machine) ---
+apps/api/config/runtime-config.json
+apps/api/logs/

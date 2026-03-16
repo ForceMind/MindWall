@@ -1,8 +1,0 @@
-{
-  "updated_at": "2026-03-13T06:55:25.518Z",
-  "openai_base_url": "https://maas-api.cn-huabei-1.xf-yun.com/v2",
-  "openai_api_key": "a250ee1117eb030b45338762dc3bb8f2:NzcyNWNhYmViNWE2MTJkMWVlMmE0MTJh",
-  "openai_model": "xop3qwen1b7",
-  "openai_embedding_model": "text-embedding-3-small",
-  "web_origin": "http://localhost:3001"
-}

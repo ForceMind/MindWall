@@ -90,7 +90,7 @@ export class AiUsageService {
     const safeLimit = Math.max(1, Math.min(100, Math.round(limit || 20)));
     const skip = (safePage - 1) * safeLimit;
 
-    const [total, records] = await Promise.all([
+    const [total, records, aggregate, uniqueUsers] = await Promise.all([
       this.prisma.aiGenerationLog.count(),
       this.prisma.aiGenerationLog.findMany({
         skip,
@@ -111,12 +111,35 @@ export class AiUsageService {
           created_at: true,
         },
       }),
+      this.prisma.aiGenerationLog.aggregate({
+        _sum: {
+          input_tokens: true,
+          output_tokens: true,
+          total_tokens: true,
+          estimated_cost_usd: true,
+        },
+      }),
+      this.prisma.aiGenerationLog.groupBy({
+        by: ['user_id'],
+        where: {
+          user_id: {
+            not: null,
+          },
+        },
+      }),
     ]);
 
     return {
       page: safePage,
       limit: safeLimit,
       total,
+      summary: {
+        total_input_tokens: aggregate._sum.input_tokens || 0,
+        total_output_tokens: aggregate._sum.output_tokens || 0,
+        total_tokens: aggregate._sum.total_tokens || 0,
+        total_estimated_cost_usd: Number(aggregate._sum.estimated_cost_usd || 0),
+        unique_user_count: uniqueUsers.length,
+      },
       records: records.map((item) => ({
         ...item,
         estimated_cost_usd: Number(item.estimated_cost_usd),

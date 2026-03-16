@@ -153,6 +153,7 @@ export class AdminDashboardService {
     const [
       publicTags,
       hiddenTags,
+      interviewRecords,
       sessions,
       totalMatches,
       recentMatches,
@@ -187,6 +188,19 @@ export class AdminDashboardService {
           tag_name: true,
           weight: true,
           ai_justification: true,
+          created_at: true,
+        },
+      }),
+      this.prisma.onboardingInterviewRecord.findMany({
+        where: { user_id: userId },
+        orderBy: [{ created_at: 'asc' }, { turn_index: 'asc' }],
+        take: 240,
+        select: {
+          id: true,
+          session_id: true,
+          turn_index: true,
+          role: true,
+          content: true,
           created_at: true,
         },
       }),
@@ -384,6 +398,14 @@ export class AdminDashboardService {
       tags: {
         public: publicTags,
         hidden: hiddenTags,
+      },
+      interview: {
+        total_turns: interviewRecords.length,
+        records: interviewRecords,
+      },
+      tag_source: {
+        strategy: '优先 AI 生成，失败时回退到内置规则算法',
+        has_ai_generation: (aiAggregate._count._all || 0) > 0,
       },
       recent: {
         sessions: sessions.map((item) => ({

@@ -447,9 +447,13 @@ a {
   align-items: flex-end;
 }
 
-.composer .textarea {
-  min-height: 44px;
-  max-height: 120px;
+.composer .chat-input {
+  min-height: 40px;
+  max-height: 88px;
+  resize: none;
+  line-height: 1.45;
+  padding-top: 9px;
+  padding-bottom: 9px;
 }
 
 .stats-grid {

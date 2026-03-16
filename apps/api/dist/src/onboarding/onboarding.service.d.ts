@@ -113,6 +113,7 @@ export declare class OnboardingService {
     }>;
     private initializeSession;
     private submitMessageInternal;
+    private appendTurn;
     private generateQuestion;
     private extractTags;
     private persistTags;

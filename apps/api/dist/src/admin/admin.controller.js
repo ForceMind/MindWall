@@ -32,6 +32,9 @@ let AdminController = class AdminController {
         if (typeof body.openai_api_key === 'string') {
             payload.openai_api_key = body.openai_api_key;
         }
+        if (typeof body.openai_embedding_api_key === 'string') {
+            payload.openai_embedding_api_key = body.openai_embedding_api_key;
+        }
         if (typeof body.openai_model === 'string') {
             payload.openai_model = body.openai_model;
         }
@@ -50,6 +53,9 @@ let AdminController = class AdminController {
         }
         if (typeof body.openai_api_key === 'string') {
             payload.openai_api_key = body.openai_api_key;
+        }
+        if (typeof body.openai_embedding_api_key === 'string') {
+            payload.openai_embedding_api_key = body.openai_embedding_api_key;
         }
         if (typeof body.openai_model === 'string') {
             payload.openai_model = body.openai_model;

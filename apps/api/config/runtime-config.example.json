@@ -1,0 +1,9 @@
+{
+  "updated_at": "",
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_api_key": "",
+  "openai_embedding_api_key": "",
+  "openai_model": "gpt-4.1-mini",
+  "openai_embedding_model": "text-embedding-3-small",
+  "web_origin": "http://localhost:3001"
+}

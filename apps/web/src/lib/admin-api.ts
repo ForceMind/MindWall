@@ -182,6 +182,8 @@ export function fetchAdminConfig(token: string) {
     openai_base_url: string;
     openai_api_key_configured: boolean;
     openai_api_key_preview: string | null;
+    openai_embedding_api_key_configured: boolean;
+    openai_embedding_api_key_preview: string | null;
     openai_model: string;
     openai_embedding_model: string;
     web_origin: string;
@@ -198,6 +200,7 @@ export function saveAdminConfig(
   payload: Partial<{
     openai_base_url: string;
     openai_api_key: string;
+    openai_embedding_api_key: string;
     openai_model: string;
     openai_embedding_model: string;
     web_origin: string;
@@ -215,6 +218,7 @@ export function testAdminConfig(
   payload: Partial<{
     openai_base_url: string;
     openai_api_key: string;
+    openai_embedding_api_key: string;
     openai_model: string;
     openai_embedding_model: string;
   }>,

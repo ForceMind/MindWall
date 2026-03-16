@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.HealthController = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../../prisma/prisma.service");
+const app_version_1 = require("../../foundation/app-version");
 let HealthController = class HealthController {
     prisma;
     constructor(prisma) {
@@ -28,6 +29,7 @@ let HealthController = class HealthController {
         return {
             status: db === 'up' ? 'ok' : 'degraded',
             time: new Date().toISOString(),
+            version: (0, app_version_1.getAppVersion)(),
             services: {
                 api: 'up',
                 db,

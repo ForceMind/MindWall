@@ -16,12 +16,15 @@ const pageError = ref('');
 const configSource = ref<Record<string, string>>({});
 const configPath = ref('');
 const keyPreview = ref('');
+const embeddingKeyPreview = ref('');
 
 const keepExistingKey = ref(true);
+const keepExistingEmbeddingKey = ref(true);
 
 const form = reactive({
   openai_base_url: '',
   openai_api_key: '',
+  openai_embedding_api_key: '',
   openai_model: '',
   openai_embedding_model: '',
   web_origin: '',
@@ -64,10 +67,12 @@ async function load() {
     form.openai_embedding_model = payload.openai_embedding_model || '';
     form.web_origin = payload.web_origin || '';
     form.openai_api_key = '';
+    form.openai_embedding_api_key = '';
 
     configSource.value = payload.source || {};
     configPath.value = payload.config_file || '';
     keyPreview.value = payload.openai_api_key_preview || '';
+    embeddingKeyPreview.value = payload.openai_embedding_api_key_preview || '';
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -89,6 +94,9 @@ function buildPayload(includeWebOrigin: boolean) {
   if (!keepExistingKey.value || form.openai_api_key.trim()) {
     payload.openai_api_key = form.openai_api_key.trim();
   }
+  if (!keepExistingEmbeddingKey.value || form.openai_embedding_api_key.trim()) {
+    payload.openai_embedding_api_key = form.openai_embedding_api_key.trim();
+  }
 
   return payload;
 }
@@ -103,6 +111,7 @@ async function save() {
     await saveAdminConfig(adminStore.token, buildPayload(true));
     noticeStore.show('配置已保存', 'success');
     keepExistingKey.value = true;
+    keepExistingEmbeddingKey.value = true;
     await load();
   } catch (error) {
     noticeStore.show(toErrorMessage(error), 'error');
@@ -141,7 +150,7 @@ onMounted(() => {
         <div>
           <h2 class="panel-title">AI 接入配置</h2>
           <p class="panel-subtitle">
-            在这里填写 API 地址、API Key、聊天模型和 Embedding 模型。Embedding 模型用于把标签向量化以进行相似度匹配。
+            在这里填写 API 地址、API Key、聊天模型。Embedding 模型可选，用于更高质量相似度匹配；留空时系统会自动降级为本地向量。
           </p>
         </div>
         <button class="btn btn-ghost" type="button" :disabled="loading" @click="load">刷新</button>
@@ -156,7 +165,11 @@ onMounted(() => {
       <div class="panel-body column">
         <label class="field">
           <span class="field-label">OpenAI Base URL</span>
-          <input v-model="form.openai_base_url" class="input" placeholder="例如 https://api.openai.com/v1" />
+          <input
+            v-model="form.openai_base_url"
+            class="input"
+            placeholder="例如 https://api.openai.com/v1（系统会自动识别 /chat/completions 与 /embeddings）"
+          />
         </label>
 
         <label class="field">
@@ -165,12 +178,16 @@ onMounted(() => {
         </label>
 
         <label class="field">
-          <span class="field-label">Embedding 模型名称</span>
-          <input v-model="form.openai_embedding_model" class="input" placeholder="例如 text-embedding-3-small" />
+          <span class="field-label">Embedding 模型名称（可选）</span>
+          <input
+            v-model="form.openai_embedding_model"
+            class="input"
+            placeholder="例如 text-embedding-3-small；留空则启用本地降级向量"
+          />
         </label>
 
         <label class="field">
-          <span class="field-label">API Key</span>
+          <span class="field-label">聊天 API Key</span>
           <input
             v-model="form.openai_api_key"
             class="input"
@@ -180,6 +197,20 @@ onMounted(() => {
           <label class="row-wrap" style="font-size: 12px; color: var(--text-muted)">
             <input v-model="keepExistingKey" type="checkbox" />
             保留服务器已保存的 Key（不勾选时，将使用上方输入覆盖）
+          </label>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Embedding API Key（独立）</span>
+          <input
+            v-model="form.openai_embedding_api_key"
+            class="input"
+            type="password"
+            :placeholder="embeddingKeyPreview ? `当前已配置：${embeddingKeyPreview}` : '可选；留空时向量接口将回退本地向量'"
+          />
+          <label class="row-wrap" style="font-size: 12px; color: var(--text-muted)">
+            <input v-model="keepExistingEmbeddingKey" type="checkbox" />
+            保留服务器已保存的 Embedding Key（不勾选时，将使用上方输入覆盖）
           </label>
         </label>
 
@@ -208,7 +239,8 @@ onMounted(() => {
         <h3 class="panel-title">配置来源</h3>
         <div class="tag-list">
           <span class="tag">BaseURL：{{ configSource.openai_base_url || '-' }}</span>
-          <span class="tag">API Key：{{ configSource.openai_api_key || '-' }}</span>
+          <span class="tag">聊天 Key：{{ configSource.openai_api_key || '-' }}</span>
+          <span class="tag">Embedding Key：{{ configSource.openai_embedding_api_key || '-' }}</span>
           <span class="tag">聊天模型：{{ configSource.openai_model || '-' }}</span>
           <span class="tag">Embedding：{{ configSource.openai_embedding_model || '-' }}</span>
           <span class="tag">Web Origin：{{ configSource.web_origin || '-' }}</span>

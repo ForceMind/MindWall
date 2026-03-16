@@ -221,7 +221,7 @@ let CompanionService = CompanionService_1 = class CompanionService {
             return null;
         }
         try {
-            const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+            const response = await fetch(this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

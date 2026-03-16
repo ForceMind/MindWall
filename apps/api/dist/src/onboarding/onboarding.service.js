@@ -183,6 +183,7 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         return this.submitMessageInternal(sessionId, session, body);
     }
     async initializeSession(userId, city) {
+        const sessionId = (0, crypto_1.randomUUID)();
         await this.prisma.userProfile.upsert({
             where: { user_id: userId },
             create: {
@@ -194,20 +195,21 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             },
         });
         const firstQuestion = await this.generateQuestion([], 0, userId);
-        const sessionId = (0, crypto_1.randomUUID)();
-        this.sessions.set(sessionId, {
+        const session = {
             sessionId,
             userId,
-            turns: [
-                {
-                    role: 'assistant',
-                    content: firstQuestion,
-                    createdAt: new Date().toISOString(),
-                },
-            ],
+            turns: [],
             answerCount: 0,
             totalQuestions: this.totalQuestions,
-        });
+        };
+        this.sessions.set(sessionId, session);
+        try {
+            await this.appendTurn(session, 'assistant', firstQuestion);
+        }
+        catch (error) {
+            this.sessions.delete(sessionId);
+            throw error;
+        }
         return {
             status: 'in_progress',
             session_id: sessionId,
@@ -222,19 +224,11 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         if (!message) {
             throw new common_1.BadRequestException('message is required.');
         }
-        session.turns.push({
-            role: 'user',
-            content: message,
-            createdAt: new Date().toISOString(),
-        });
+        await this.appendTurn(session, 'user', message);
         session.answerCount += 1;
         if (session.answerCount < session.totalQuestions) {
             const nextQuestion = await this.generateQuestion(session.turns, session.answerCount, session.userId);
-            session.turns.push({
-                role: 'assistant',
-                content: nextQuestion,
-                createdAt: new Date().toISOString(),
-            });
+            await this.appendTurn(session, 'assistant', nextQuestion);
             return {
                 status: 'in_progress',
                 session_id: sessionId,
@@ -265,6 +259,23 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
             public_tags: publicTags,
             onboarding_summary: extracted.onboarding_summary,
         };
+    }
+    async appendTurn(session, role, content) {
+        const createdAt = new Date().toISOString();
+        session.turns.push({
+            role,
+            content,
+            createdAt,
+        });
+        await this.prisma.onboardingInterviewRecord.create({
+            data: {
+                user_id: session.userId,
+                session_id: session.sessionId,
+                turn_index: session.turns.length,
+                role,
+                content,
+            },
+        });
     }
     async generateQuestion(turns, turnIndex, userId) {
         const previousQuestions = this.getPreviousAssistantQuestions(turns);
@@ -815,13 +826,16 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
     }
     async buildTagEmbedding(text, userId) {
         const aiConfig = await this.adminConfigService.getAiConfig();
-        const apiKey = aiConfig.openaiApiKey;
+        const apiKey = aiConfig.openaiEmbeddingApiKey;
         if (!apiKey) {
             return this.buildDeterministicEmbedding(text);
         }
         const model = aiConfig.openaiEmbeddingModel;
+        if (!model) {
+            return this.buildDeterministicEmbedding(text);
+        }
         try {
-            const response = await fetch(`${aiConfig.openaiBaseUrl}/embeddings`, {
+            const response = await fetch(this.adminConfigService.getEmbeddingsUrl(aiConfig.openaiBaseUrl), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -894,7 +908,7 @@ let OnboardingService = OnboardingService_1 = class OnboardingService {
         }
         const model = aiConfig.openaiModel;
         try {
-            const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+            const response = await fetch(this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

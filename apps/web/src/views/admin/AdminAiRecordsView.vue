@@ -8,18 +8,22 @@ import { useAdminSessionStore } from '@/stores/admin-session';
 
 const adminStore = useAdminSessionStore();
 
+function createEmptySummary() {
+  return {
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    total_tokens: 0,
+    total_estimated_cost_usd: 0,
+    unique_user_count: 0,
+  };
+}
+
 const page = ref(1);
 const limit = ref(20);
 const total = ref(0);
 const loading = ref(false);
 const pageError = ref('');
-const summary = ref({
-  total_input_tokens: 0,
-  total_output_tokens: 0,
-  total_tokens: 0,
-  total_estimated_cost_usd: 0,
-  unique_user_count: 0,
-});
+const summary = ref(createEmptySummary());
 
 const records = ref<Array<{
   id: string;
@@ -46,11 +50,17 @@ async function load() {
   pageError.value = '';
   try {
     const payload = await fetchAdminAiRecords(adminStore.token, page.value, limit.value);
-    total.value = payload.total;
-    summary.value = payload.summary;
-    records.value = payload.records;
+    total.value = Number(payload?.total || 0);
+    summary.value = {
+      ...createEmptySummary(),
+      ...(payload?.summary || {}),
+    };
+    records.value = Array.isArray(payload?.records) ? payload.records : [];
   } catch (error) {
     pageError.value = toErrorMessage(error);
+    summary.value = createEmptySummary();
+    records.value = [];
+    total.value = 0;
   } finally {
     loading.value = false;
   }

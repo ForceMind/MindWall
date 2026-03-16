@@ -246,6 +246,8 @@ export class OnboardingService {
   }
 
   private async initializeSession(userId: string, city: string | null) {
+    const sessionId = randomUUID();
+
     await this.prisma.userProfile.upsert({
       where: { user_id: userId },
       create: {
@@ -258,21 +260,21 @@ export class OnboardingService {
     });
 
     const firstQuestion = await this.generateQuestion([], 0, userId);
-    const sessionId = randomUUID();
-
-    this.sessions.set(sessionId, {
+    const session: OnboardingSession = {
       sessionId,
       userId,
-      turns: [
-        {
-          role: 'assistant',
-          content: firstQuestion,
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      turns: [],
       answerCount: 0,
       totalQuestions: this.totalQuestions,
-    });
+    };
+
+    this.sessions.set(sessionId, session);
+    try {
+      await this.appendTurn(session, 'assistant', firstQuestion);
+    } catch (error) {
+      this.sessions.delete(sessionId);
+      throw error;
+    }
 
     return {
       status: 'in_progress',
@@ -294,11 +296,7 @@ export class OnboardingService {
       throw new BadRequestException('message is required.');
     }
 
-    session.turns.push({
-      role: 'user',
-      content: message,
-      createdAt: new Date().toISOString(),
-    });
+    await this.appendTurn(session, 'user', message);
     session.answerCount += 1;
 
     if (session.answerCount < session.totalQuestions) {
@@ -307,11 +305,7 @@ export class OnboardingService {
         session.answerCount,
         session.userId,
       );
-      session.turns.push({
-        role: 'assistant',
-        content: nextQuestion,
-        createdAt: new Date().toISOString(),
-      });
+      await this.appendTurn(session, 'assistant', nextQuestion);
 
       return {
         status: 'in_progress',
@@ -346,6 +340,29 @@ export class OnboardingService {
       public_tags: publicTags,
       onboarding_summary: extracted.onboarding_summary,
     };
+  }
+
+  private async appendTurn(
+    session: OnboardingSession,
+    role: TurnRole,
+    content: string,
+  ) {
+    const createdAt = new Date().toISOString();
+    session.turns.push({
+      role,
+      content,
+      createdAt,
+    });
+
+    await this.prisma.onboardingInterviewRecord.create({
+      data: {
+        user_id: session.userId,
+        session_id: session.sessionId,
+        turn_index: session.turns.length,
+        role,
+        content,
+      },
+    });
   }
 
   private async generateQuestion(
@@ -1040,15 +1057,20 @@ export class OnboardingService {
 
   private async buildTagEmbedding(text: string, userId?: string) {
     const aiConfig = await this.adminConfigService.getAiConfig();
-    const apiKey = aiConfig.openaiApiKey;
+    const apiKey = aiConfig.openaiEmbeddingApiKey;
     if (!apiKey) {
       return this.buildDeterministicEmbedding(text);
     }
 
     const model = aiConfig.openaiEmbeddingModel;
+    if (!model) {
+      return this.buildDeterministicEmbedding(text);
+    }
 
     try {
-      const response = await fetch(`${aiConfig.openaiBaseUrl}/embeddings`, {
+      const response = await fetch(
+        this.adminConfigService.getEmbeddingsUrl(aiConfig.openaiBaseUrl),
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1058,7 +1080,8 @@ export class OnboardingService {
           model,
           input: text.slice(0, 4000),
         }),
-      });
+        },
+      );
 
       if (!response.ok) {
         const detail = await response.text();
@@ -1144,7 +1167,9 @@ export class OnboardingService {
     const model = aiConfig.openaiModel;
 
     try {
-      const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+      const response = await fetch(
+        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1166,7 +1191,8 @@ export class OnboardingService {
             },
           ],
         }),
-      });
+        },
+      );
 
       if (!response.ok) {
         const detail = await response.text();

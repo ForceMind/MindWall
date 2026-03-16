@@ -84,6 +84,21 @@ export declare class AdminDashboardController {
                 ai_justification: string;
             }[];
         };
+        interview: {
+            total_turns: number;
+            records: {
+                created_at: Date;
+                id: string;
+                session_id: string;
+                content: string;
+                turn_index: number;
+                role: string;
+            }[];
+        };
+        tag_source: {
+            strategy: string;
+            has_ai_generation: boolean;
+        };
         recent: {
             sessions: {
                 is_active: boolean;
@@ -173,6 +188,13 @@ export declare class AdminDashboardController {
         page: number;
         limit: number;
         total: number;
+        summary: {
+            total_input_tokens: number;
+            total_output_tokens: number;
+            total_tokens: number;
+            total_estimated_cost_usd: number;
+            unique_user_count: number;
+        };
         records: {
             estimated_cost_usd: number;
             user_id: string | null;

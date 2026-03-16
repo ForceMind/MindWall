@@ -15,17 +15,38 @@ export class AdminConfigService {
 
   async getAiConfig(): Promise<AiRuntimeConfig> {
     const runtime = await this.readRuntimeConfig();
+    const runtimeHasEmbeddingApiKey = Object.prototype.hasOwnProperty.call(
+      runtime,
+      'openai_embedding_api_key',
+    );
+    const runtimeEmbeddingApiKey =
+      typeof runtime.openai_embedding_api_key === 'string'
+        ? runtime.openai_embedding_api_key.trim()
+        : '';
+    const envEmbeddingApiKey = process.env.OPENAI_EMBEDDING_API_KEY?.trim() || '';
+
+    const runtimeHasEmbeddingModel = Object.prototype.hasOwnProperty.call(
+      runtime,
+      'openai_embedding_model',
+    );
+    const runtimeEmbeddingModel =
+      typeof runtime.openai_embedding_model === 'string'
+        ? runtime.openai_embedding_model.trim()
+        : '';
+    const envEmbeddingModel = process.env.OPENAI_EMBEDDING_MODEL?.trim() || '';
 
     return {
       openaiBaseUrl: this.normalizeBaseUrl(
         runtime.openai_base_url || process.env.OPENAI_BASE_URL || this.defaultOpenAiBaseUrl,
       ),
       openaiApiKey: runtime.openai_api_key || process.env.OPENAI_API_KEY || '',
+      openaiEmbeddingApiKey: runtimeHasEmbeddingApiKey
+        ? runtimeEmbeddingApiKey
+        : envEmbeddingApiKey,
       openaiModel: runtime.openai_model || process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-      openaiEmbeddingModel:
-        runtime.openai_embedding_model ||
-        process.env.OPENAI_EMBEDDING_MODEL ||
-        'text-embedding-3-small',
+      openaiEmbeddingModel: runtimeHasEmbeddingModel
+        ? runtimeEmbeddingModel
+        : envEmbeddingModel || 'text-embedding-3-small',
       webOrigin: runtime.web_origin || process.env.WEB_ORIGIN || 'http://localhost:3001',
     };
   }
@@ -33,14 +54,15 @@ export class AdminConfigService {
   async getPublicConfig() {
     const runtime = await this.readRuntimeConfig();
     const ai = await this.getAiConfig();
-    const key = ai.openaiApiKey;
+    const chatKey = ai.openaiApiKey;
+    const embeddingKey = ai.openaiEmbeddingApiKey;
 
     return {
       openai_base_url: ai.openaiBaseUrl,
-      openai_api_key_configured: Boolean(key),
-      openai_api_key_preview: key
-        ? `${key.slice(0, 3)}***${key.slice(Math.max(3, key.length - 4))}`
-        : null,
+      openai_api_key_configured: Boolean(chatKey),
+      openai_api_key_preview: this.previewApiKey(chatKey),
+      openai_embedding_api_key_configured: Boolean(embeddingKey),
+      openai_embedding_api_key_preview: this.previewApiKey(embeddingKey),
       openai_model: ai.openaiModel,
       openai_embedding_model: ai.openaiEmbeddingModel,
       web_origin: ai.webOrigin,
@@ -55,12 +77,23 @@ export class AdminConfigService {
           : process.env.OPENAI_API_KEY
             ? 'env'
             : 'unset',
+        openai_embedding_api_key: Object.prototype.hasOwnProperty.call(
+          runtime,
+          'openai_embedding_api_key',
+        )
+          ? 'runtime-config'
+          : process.env.OPENAI_EMBEDDING_API_KEY
+            ? 'env'
+            : 'unset',
         openai_model: runtime.openai_model
           ? 'runtime-config'
           : process.env.OPENAI_MODEL
             ? 'env'
             : 'default',
-        openai_embedding_model: runtime.openai_embedding_model
+        openai_embedding_model: Object.prototype.hasOwnProperty.call(
+          runtime,
+          'openai_embedding_model',
+        )
           ? 'runtime-config'
           : process.env.OPENAI_EMBEDDING_MODEL
             ? 'env'
@@ -89,6 +122,9 @@ export class AdminConfigService {
     }
     if (typeof input.openai_api_key === 'string') {
       next.openai_api_key = input.openai_api_key.trim();
+    }
+    if (typeof input.openai_embedding_api_key === 'string') {
+      next.openai_embedding_api_key = input.openai_embedding_api_key.trim();
     }
     if (typeof input.openai_model === 'string') {
       next.openai_model = input.openai_model.trim();
@@ -121,6 +157,10 @@ export class AdminConfigService {
         typeof overrides?.openai_api_key === 'string'
           ? overrides.openai_api_key.trim()
           : current.openaiApiKey,
+      openaiEmbeddingApiKey:
+        typeof overrides?.openai_embedding_api_key === 'string'
+          ? overrides.openai_embedding_api_key.trim()
+          : current.openaiEmbeddingApiKey,
       openaiModel:
         typeof overrides?.openai_model === 'string' &&
         overrides.openai_model.trim()
@@ -164,10 +204,12 @@ export class AdminConfigService {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${ai.openaiApiKey}`,
     };
+    const chatEndpoint = this.getChatCompletionsUrl(ai.openaiBaseUrl);
+    const embeddingEndpoint = this.getEmbeddingsUrl(ai.openaiBaseUrl);
 
     const chatStartedAt = Date.now();
     try {
-      const response = await fetch(`${ai.openaiBaseUrl}/chat/completions`, {
+      const response = await fetch(chatEndpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -208,43 +250,59 @@ export class AdminConfigService {
     }
 
     const embeddingStartedAt = Date.now();
-    try {
-      const response = await fetch(`${ai.openaiBaseUrl}/embeddings`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: ai.openaiEmbeddingModel,
-          input: 'MindWall API connectivity check',
-        }),
-      });
+    if (!ai.openaiEmbeddingModel) {
+      result.embedding.ok = false;
+      result.embedding.error = '未配置 Embedding 模型，系统将使用本地降级向量。';
+    } else if (!ai.openaiEmbeddingApiKey) {
+      result.embedding.ok = false;
+      result.embedding.error = '未配置 Embedding API Key，向量接口将跳过并回退本地向量。';
+    } else {
+      const embeddingHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ai.openaiEmbeddingApiKey}`,
+      };
+      try {
+        const response = await fetch(embeddingEndpoint, {
+          method: 'POST',
+          headers: embeddingHeaders,
+          body: JSON.stringify({
+            model: ai.openaiEmbeddingModel,
+            input: 'MindWall API connectivity check',
+          }),
+        });
 
-      result.embedding.status = response.status;
-      result.embedding.latency_ms = Date.now() - embeddingStartedAt;
+        result.embedding.status = response.status;
+        result.embedding.latency_ms = Date.now() - embeddingStartedAt;
 
-      if (!response.ok) {
-        const detail = await response.text();
-        result.embedding.error = this.clipError(detail);
-      } else {
-        const payload = (await response.json()) as {
-          data?: Array<{ embedding?: number[] }>;
-        };
-        const vector = payload.data?.[0]?.embedding;
-        if (!Array.isArray(vector)) {
-          result.embedding.error = '向量接口返回成功，但响应中没有 embedding 数组。';
+        if (!response.ok) {
+          const detail = await response.text();
+          result.embedding.error = this.clipError(detail);
         } else {
-          result.embedding.ok = true;
-          result.embedding.vector_size = vector.length;
+          const payload = (await response.json()) as {
+            data?: Array<{ embedding?: number[] }>;
+          };
+          const vector = payload.data?.[0]?.embedding;
+          if (!Array.isArray(vector)) {
+            result.embedding.error = '向量接口返回成功，但响应中没有 embedding 数组。';
+          } else {
+            result.embedding.ok = true;
+            result.embedding.vector_size = vector.length;
+          }
         }
+      } catch (error) {
+        result.embedding.latency_ms = Date.now() - embeddingStartedAt;
+        result.embedding.error = this.clipError((error as Error).message || String(error));
       }
-    } catch (error) {
-      result.embedding.latency_ms = Date.now() - embeddingStartedAt;
-      result.embedding.error = this.clipError((error as Error).message || String(error));
     }
 
-    result.ok = result.chat.ok && result.embedding.ok;
-    result.message = result.ok
-      ? '聊天接口与向量接口均可用。'
-      : '至少一个接口测试失败，请检查接口地址、API Key 与模型名称。';
+    result.ok = result.chat.ok;
+    if (result.chat.ok && result.embedding.ok) {
+      result.message = '聊天接口与向量接口均可用。';
+    } else if (result.chat.ok) {
+      result.message = '聊天接口可用，向量接口不可用时系统会自动降级为本地向量。';
+    } else {
+      result.message = '聊天接口测试失败，请检查 Base URL、API Key 与模型名称。';
+    }
 
     if (result.ok) {
       await this.serverLogService.info('admin.config.test', 'ai connectivity test passed', {
@@ -309,7 +367,44 @@ export class AdminConfigService {
     return normalized.replace(/\/+$/, '');
   }
 
+  getChatCompletionsUrl(baseUrl: string) {
+    return this.resolveEndpoint(baseUrl, 'chat');
+  }
+
+  getEmbeddingsUrl(baseUrl: string) {
+    return this.resolveEndpoint(baseUrl, 'embedding');
+  }
+
+  private resolveEndpoint(baseUrl: string, type: 'chat' | 'embedding') {
+    const normalized = this.normalizeBaseUrl(baseUrl);
+
+    if (type === 'chat') {
+      if (/\/chat\/completions$/i.test(normalized)) {
+        return normalized;
+      }
+      if (/\/embeddings$/i.test(normalized)) {
+        return normalized.replace(/\/embeddings$/i, '/chat/completions');
+      }
+      return `${normalized}/chat/completions`;
+    }
+
+    if (/\/embeddings$/i.test(normalized)) {
+      return normalized;
+    }
+    if (/\/chat\/completions$/i.test(normalized)) {
+      return normalized.replace(/\/chat\/completions$/i, '/embeddings');
+    }
+    return `${normalized}/embeddings`;
+  }
+
   private clipError(raw: string) {
     return (raw || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  }
+
+  private previewApiKey(key: string) {
+    if (!key) {
+      return null;
+    }
+    return `${key.slice(0, 3)}***${key.slice(Math.max(3, key.length - 4))}`;
   }
 }

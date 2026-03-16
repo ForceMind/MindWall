@@ -1,10 +1,10 @@
 @echo off
 setlocal
-powershell -ExecutionPolicy Bypass -File "%~dp0deploy-update.ps1" %*
+chcp 65001 >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0deploy-update.ps1" %*
 if errorlevel 1 (
   echo.
-  echo Deploy failed. Review the error above.
+  echo 部署失败，请查看上方日志。
   pause
 )
 endlocal
-

@@ -57,6 +57,18 @@ export function mapBackendMessage(rawMessage: string, status: number) {
   if (lower.includes('onboarding session not found')) {
     return '访谈会话已失效，请重新开始。';
   }
+  if (lower.includes('authenticate first')) {
+    return '聊天鉴权已失效，请返回会话列表后重新进入。';
+  }
+  if (lower.includes('user not found')) {
+    return '用户不存在或已失效，请重新登录后重试。';
+  }
+  if (lower.includes('match not found')) {
+    return '会话不存在，可能已失效。';
+  }
+  if (lower.includes('user cannot access this match')) {
+    return '你无权访问该会话。';
+  }
 
   return msg;
 }

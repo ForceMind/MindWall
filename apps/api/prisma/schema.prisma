@@ -40,6 +40,7 @@ model User {
   sessions         AuthSession[]
   tags             UserTag[]
   ai_logs          AiGenerationLog[]
+  interview_records OnboardingInterviewRecord[]
   matches_a        Match[]          @relation("MatchUserA")
   matches_b        Match[]          @relation("MatchUserB")
   sent_messages    SandboxMessage[] @relation("SentMessages")
@@ -182,4 +183,20 @@ model PromptTemplate {
 
   @@index([category, is_active])
   @@map("prompt_templates")
+}
+
+model OnboardingInterviewRecord {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  session_id String   @db.Uuid
+  turn_index Int
+  role       String   @db.VarChar(16)
+  content    String   @db.Text
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([session_id, turn_index])
+  @@index([user_id, created_at])
+  @@index([session_id, created_at])
+  @@map("onboarding_interview_records")
 }

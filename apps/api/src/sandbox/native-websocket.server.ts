@@ -160,7 +160,7 @@ export class NativeWebSocketServer {
       } catch {
         this.sendJson(clientId, {
           type: 'error',
-          message: 'Invalid JSON payload.',
+          message: '消息解析失败，请检查消息格式。',
         });
         continue;
       }
@@ -168,7 +168,7 @@ export class NativeWebSocketServer {
       Promise.resolve(this.handlers.onMessage?.(clientId, payload)).catch(
         (error: unknown) => {
           const message =
-            error instanceof Error ? error.message : 'Message handling failed.';
+            error instanceof Error ? error.message : '消息处理失败，请稍后重试。';
           this.sendJson(clientId, { type: 'error', message });
         },
       );

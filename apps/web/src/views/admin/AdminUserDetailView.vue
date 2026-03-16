@@ -19,6 +19,17 @@ const detail = ref<Record<string, any> | null>(null);
 
 const userId = computed(() => String(route.params.userId || ''));
 const user = computed(() => detail.value?.user || null);
+const interviewRecords = computed(() => detail.value?.interview?.records || []);
+
+function interviewRoleText(role: string) {
+  if (role === 'assistant') {
+    return '系统提问';
+  }
+  if (role === 'user') {
+    return '用户回答';
+  }
+  return '记录';
+}
 
 async function load() {
   if (!adminStore.token || !userId.value) {
@@ -108,7 +119,35 @@ onMounted(() => {
 
     <section v-if="detail" class="panel">
       <div class="panel-body column">
+        <div class="row" style="justify-content: space-between; align-items: baseline">
+          <h3 class="panel-title">访谈记录</h3>
+          <span class="muted" style="font-size: 12px">共 {{ detail.interview?.total_turns || 0 }} 条</span>
+        </div>
+
+        <div class="card-list">
+          <article
+            v-for="row in interviewRecords"
+            :key="row.id"
+            class="list-card"
+            style="gap: 6px"
+          >
+            <div class="row" style="justify-content: space-between">
+              <span class="badge badge-muted">{{ interviewRoleText(row.role) }} #{{ row.turn_index }}</span>
+              <span class="muted" style="font-size: 12px">{{ formatDateTime(row.created_at) }}</span>
+            </div>
+            <div>{{ row.content }}</div>
+          </article>
+          <div v-if="interviewRecords.length === 0" class="empty-box">暂无访谈记录</div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="detail" class="panel">
+      <div class="panel-body column">
         <h3 class="panel-title">公开标签</h3>
+        <p class="muted" style="margin: 0; font-size: 12px">
+          标签来源：{{ detail.tag_source?.strategy || '优先 AI 生成，失败时回退到内置规则算法' }}。
+        </p>
         <div class="tag-list">
           <span v-for="tag in detail.tags?.public || []" :key="tag.tag_name" class="tag">
             {{ tag.tag_name }} ({{ tag.weight }})

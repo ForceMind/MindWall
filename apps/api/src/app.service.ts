@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { getAppVersion } from './system/foundation/app-version';
 
 @Injectable()
 export class AppService {
   getServiceInfo() {
+    const version = getAppVersion();
+
     return {
       name: 'MindWall API',
       status: 'running',
-      version: process.env.npm_package_version || '0.0.1',
+      version,
       time: new Date().toISOString(),
       endpoints: {
         health: '/health',

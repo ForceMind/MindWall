@@ -61,10 +61,10 @@ let SandboxService = SandboxService_1 = class SandboxService {
             },
         });
         if (!match) {
-            throw new common_1.NotFoundException('Match not found.');
+            throw new common_1.NotFoundException('会话不存在。');
         }
         if (userId && userId !== match.user_a_id && userId !== match.user_b_id) {
-            throw new common_1.ForbiddenException('User cannot access this match.');
+            throw new common_1.ForbiddenException('你无权访问该会话。');
         }
         const rows = await this.prisma.sandboxMessage.findMany({
             where: { match_id: matchId },
@@ -103,10 +103,10 @@ let SandboxService = SandboxService_1 = class SandboxService {
     async submitWallDecision(input) {
         const info = await this.getMatchParticipantInfo(input.matchId, input.userId);
         if (info.status === client_1.MatchStatus.rejected) {
-            throw new common_1.BadRequestException('This match is rejected.');
+            throw new common_1.BadRequestException('该会话已被拒绝。');
         }
         if (info.status !== client_1.MatchStatus.wall_broken && info.resonanceScore < 100) {
-            throw new common_1.BadRequestException('Wall break is not ready until resonance reaches 100.');
+            throw new common_1.BadRequestException('共鸣值达到 100 后才可发起破壁。');
         }
         if (info.status === client_1.MatchStatus.wall_broken) {
             return this.buildWallStateFromInfo(info);
@@ -156,17 +156,17 @@ let SandboxService = SandboxService_1 = class SandboxService {
     async processMessage(input) {
         const text = input.text.trim();
         if (!text) {
-            throw new common_1.BadRequestException('text is required.');
+            throw new common_1.BadRequestException('消息内容不能为空。');
         }
         if (text.length > 4000) {
-            throw new common_1.BadRequestException('text is too long.');
+            throw new common_1.BadRequestException('消息过长，请控制在 4000 字以内。');
         }
         const participant = await this.getMatchParticipantInfo(input.matchId, input.senderId);
         if (participant.status === client_1.MatchStatus.wall_broken) {
-            throw new common_1.BadRequestException('This match already broke the wall and should use direct_message.');
+            throw new common_1.BadRequestException('该会话已破壁，请切换为直聊发送。');
         }
         if (participant.status === client_1.MatchStatus.rejected) {
-            throw new common_1.BadRequestException('This match is rejected.');
+            throw new common_1.BadRequestException('该会话已被拒绝。');
         }
         const [senderTags, receiverTags] = await Promise.all([
             this.prisma.userTag.findMany({
@@ -253,14 +253,14 @@ let SandboxService = SandboxService_1 = class SandboxService {
     async processDirectMessage(input) {
         const text = input.text.trim();
         if (!text) {
-            throw new common_1.BadRequestException('text is required.');
+            throw new common_1.BadRequestException('消息内容不能为空。');
         }
         if (text.length > 4000) {
-            throw new common_1.BadRequestException('text is too long.');
+            throw new common_1.BadRequestException('消息过长，请控制在 4000 字以内。');
         }
         const participant = await this.getMatchParticipantInfo(input.matchId, input.senderId);
         if (participant.status !== client_1.MatchStatus.wall_broken) {
-            throw new common_1.BadRequestException('Direct chat is available only after wall is broken.');
+            throw new common_1.BadRequestException('仅在破壁后才可使用直聊。');
         }
         const message = await this.prisma.sandboxMessage.create({
             data: {
@@ -363,10 +363,10 @@ let SandboxService = SandboxService_1 = class SandboxService {
             },
         });
         if (!match) {
-            throw new common_1.NotFoundException('Match not found.');
+            throw new common_1.NotFoundException('会话不存在。');
         }
         if (senderId !== match.user_a_id && senderId !== match.user_b_id) {
-            throw new common_1.ForbiddenException('Sender is not part of this match.');
+            throw new common_1.ForbiddenException('当前用户不在该会话中。');
         }
         return {
             matchId: match.id,
@@ -459,7 +459,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
             aiAction: action,
             rewrittenText: rewrittenText.slice(0, 2000),
             hiddenTagUpdates: input.hiddenTagUpdates || {},
-            reason: (input.reason || 'safety middleware decision').slice(0, 220),
+            reason: (input.reason || '安全中间层判定').slice(0, 220),
         };
     }
     fallbackMiddleware(text) {
@@ -583,7 +583,7 @@ let SandboxService = SandboxService_1 = class SandboxService {
         }
         const model = aiConfig.openaiModel;
         try {
-            const response = await fetch(`${aiConfig.openaiBaseUrl}/chat/completions`, {
+            const response = await fetch(this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
