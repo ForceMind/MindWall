@@ -344,9 +344,136 @@ WEB_PORT=$WEB_PORT
 EOF
 }
 
+port_pids() {
+  local port="$1"
+  if have_command ss; then
+    ss -lntp "( sport = :$port )" 2>/dev/null \
+      | grep -oE 'pid=[0-9]+' \
+      | cut -d= -f2 \
+      | sort -u
+    return
+  fi
+  if have_command lsof; then
+    lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u
+  fi
+}
+
+pid_cmdline() {
+  local pid="$1"
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
+pid_comm() {
+  local pid="$1"
+  cat "/proc/$pid/comm" 2>/dev/null || true
+}
+
+is_pid_mindwall_related() {
+  local pid="$1"
+  local cmdline comm
+  cmdline="$(pid_cmdline "$pid")"
+  comm="$(pid_comm "$pid")"
+
+  if [[ "$cmdline" == *"$ROOT_DIR"* || "$cmdline" == *"$API_DIR"* || "$cmdline" == *"$WEB_DIR"* ]]; then
+    return 0
+  fi
+  if [[ "$cmdline" == *"mindwall-api"* || "$cmdline" == *"mindwall-web"* || "$cmdline" == *".mw-runtime"* ]]; then
+    return 0
+  fi
+  if [[ "$comm" == "node" && "$cmdline" == *"vite preview"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_pid_nginx() {
+  local pid="$1"
+  local cmdline comm
+  cmdline="$(pid_cmdline "$pid")"
+  comm="$(pid_comm "$pid")"
+  [[ "$comm" == "nginx" || "$cmdline" == *"nginx:"* ]]
+}
+
+port_owner_summary() {
+  local port="$1"
+  if have_command ss; then
+    local summary
+    summary="$(
+      ss -lntp "( sport = :$port )" 2>/dev/null \
+        | tail -n +2 \
+        | awk '{$1=$1;print}' \
+        | paste -sd ';' -
+    )"
+    if [[ -n "$summary" ]]; then
+      echo "$summary"
+      return
+    fi
+  fi
+  if have_command lsof; then
+    local summary
+    summary="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 | awk '{printf "%s(pid=%s) ",$1,$2}')"
+    if [[ -n "$summary" ]]; then
+      echo "$summary"
+      return
+    fi
+  fi
+  echo "未知进程"
+}
+
+kill_mindwall_listeners_on_port() {
+  local port="$1"
+  local label="$2"
+  local pid
+  local killed=0
+
+  while read -r pid; do
+    [[ -z "$pid" ]] && continue
+    if is_pid_mindwall_related "$pid"; then
+      warn "$label 端口 $port 被旧 MindWall 进程占用，终止 PID $pid"
+      as_root kill "$pid" 2>/dev/null || true
+      killed=1
+    fi
+  done < <(port_pids "$port")
+
+  if (( killed == 1 )); then
+    sleep 1
+    while read -r pid; do
+      [[ -z "$pid" ]] && continue
+      if is_pid_mindwall_related "$pid"; then
+        as_root kill -9 "$pid" 2>/dev/null || true
+      fi
+    done < <(port_pids "$port")
+    sleep 1
+  fi
+}
+
+saved_port_occupant_allowed() {
+  local port="$1"
+  local kind="$2"
+  local pid
+  while read -r pid; do
+    [[ -z "$pid" ]] && continue
+    if is_pid_mindwall_related "$pid"; then
+      continue
+    fi
+    if [[ "$kind" == "web" ]] && is_pid_nginx "$pid"; then
+      continue
+    fi
+    return 1
+  done < <(port_pids "$port")
+  return 0
+}
+
 check_ports() {
   validate_port "$API_PORT" || die "API 端口不合法: $API_PORT"
   validate_port "$WEB_PORT" || die "Web 端口不合法: $WEB_PORT"
+
+  if port_in_use "$API_PORT"; then
+    kill_mindwall_listeners_on_port "$API_PORT" "API"
+  fi
+  if port_in_use "$WEB_PORT"; then
+    kill_mindwall_listeners_on_port "$WEB_PORT" "Web"
+  fi
 
   if [[ "$API_PORT" == "$WEB_PORT" ]]; then
     if [[ "$WEB_PORT_SET" == "1" && "$API_PORT_SET" == "1" ]]; then
@@ -357,26 +484,26 @@ check_ports() {
   fi
 
   if port_in_use "$API_PORT"; then
-    if [[ -n "$SAVED_API_PORT" && "$API_PORT" == "$SAVED_API_PORT" ]]; then
+    if [[ -n "$SAVED_API_PORT" && "$API_PORT" == "$SAVED_API_PORT" ]] && saved_port_occupant_allowed "$API_PORT" "api"; then
       :
     elif [[ "$API_PORT_SET" == "1" ]]; then
-      die "指定的 API 端口 $API_PORT 已被占用。"
+      die "指定的 API 端口 $API_PORT 已被占用（$(port_owner_summary "$API_PORT")）。"
     else
       local old_api="$API_PORT"
       API_PORT="$(next_free_port "$API_PORT")"
-      warn "API 端口 $old_api 已占用，自动调整为 $API_PORT"
+      warn "API 端口 $old_api 已占用（$(port_owner_summary "$old_api")），自动调整为 $API_PORT"
     fi
   fi
 
   if port_in_use "$WEB_PORT"; then
-    if [[ -n "$SAVED_WEB_PORT" && "$WEB_PORT" == "$SAVED_WEB_PORT" ]]; then
+    if [[ -n "$SAVED_WEB_PORT" && "$WEB_PORT" == "$SAVED_WEB_PORT" ]] && saved_port_occupant_allowed "$WEB_PORT" "web"; then
       :
     elif [[ "$WEB_PORT_SET" == "1" ]]; then
-      die "指定的 Web 端口 $WEB_PORT 已被占用。"
+      die "指定的 Web 端口 $WEB_PORT 已被占用（$(port_owner_summary "$WEB_PORT")）。"
     else
       local old_web="$WEB_PORT"
       WEB_PORT="$(next_free_port "$WEB_PORT")"
-      warn "Web 端口 $old_web 已占用，自动调整为 $WEB_PORT"
+      warn "Web 端口 $old_web 已占用（$(port_owner_summary "$old_web")），自动调整为 $WEB_PORT"
     fi
   fi
 }
