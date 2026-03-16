@@ -2,6 +2,20 @@
 import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 
+function resolveAllowedHosts(): true | string[] {
+  const raw = (process.env.VITE_ALLOWED_HOSTS || '').trim();
+  if (!raw) {
+    return true;
+  }
+  const hosts = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return hosts.length > 0 ? hosts : true;
+}
+
+const allowedHosts = resolveAllowedHosts();
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -12,9 +26,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3001,
+    allowedHosts,
   },
   preview: {
     host: '0.0.0.0',
     port: 3001,
+    allowedHosts,
   },
 });

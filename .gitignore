@@ -16,6 +16,8 @@ Thumbs.db
 # --- Node ---
 **/node_modules/
 **/dist/
+**/*.tsbuildinfo
+.mw-runtime/
 
 # --- Runtime data (never deploy from local machine) ---
 apps/api/config/runtime-config.json
