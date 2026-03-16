@@ -535,9 +535,9 @@ start_services() {
     pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
   pm2_cmd restart mindwall-api --update-env
 
-  pm2_cmd describe mindwall-web >/dev/null 2>&1 || \
-    __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
-  __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd restart mindwall-web --update-env
+  # Web 进程总是按当前端口和主机白名单重建，避免旧参数残留（如端口仍停留在 3001）
+  pm2_cmd delete mindwall-web >/dev/null 2>&1 || true
+  __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS="$allow_host" pm2_cmd start "$NPM_BIN" --name mindwall-web --cwd "$WEB_DIR" -- run start -- --host 0.0.0.0 --port "$WEB_PORT"
   pm2_cmd save
 }
 
