@@ -25,7 +25,7 @@ fi
 
 BRANCH="${BRANCH:-main}"
 WEB_PORT="${WEB_PORT:-3001}"
-NODE_MAJOR="${NODE_MAJOR:-22}"
+NODE_MAJOR="${NODE_MAJOR:-20}"
 SKIP_GIT="${SKIP_GIT:-0}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"
 SKIP_MIGRATE="${SKIP_MIGRATE:-0}"
@@ -448,30 +448,56 @@ install_docker() {
 
 install_nodejs() {
   echo "[安装 3/5] 安装 Node.js 与 npm"
+  detect_pkg_manager
   if have_command node && have_command npm && [[ "$(node_major_installed)" -ge "$NODE_MAJOR" ]]; then
     echo "Node.js 已满足要求：$(node -v)"
     return
   fi
 
+  # 优先尝试 NodeSource 源；失败时回退系统源，避免 OpenCloudOS 直接退出
   case "$PKG_MANAGER" in
     apt)
-      as_root bash -lc "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -"
-      install_packages nodejs
+      if as_root bash -lc "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -"; then
+        install_packages nodejs || true
+      fi
       ;;
     dnf|yum)
-      as_root bash -lc "curl -fsSL https://rpm.nodesource.com/setup_${NODE_MAJOR}.x | bash -"
-      install_packages nodejs
+      if as_root bash -lc "curl -fsSL https://rpm.nodesource.com/setup_${NODE_MAJOR}.x | bash -"; then
+        install_packages nodejs npm || install_packages nodejs || true
+      fi
       ;;
     zypper)
       install_packages nodejs npm || install_packages nodejs20 npm20 || true
       ;;
     pacman)
-      install_packages nodejs npm
+      install_packages nodejs npm || true
       ;;
   esac
 
+  if ! have_command node || ! have_command npm || [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
+    echo "NodeSource 安装失败或版本不足，回退系统包安装..."
+    case "$PKG_MANAGER" in
+      apt)
+        install_packages nodejs npm || true
+        ;;
+      dnf|yum)
+        install_packages nodejs npm || install_packages nodejs || true
+        ;;
+      zypper)
+        install_packages nodejs npm || install_packages nodejs20 npm20 || true
+        ;;
+      pacman)
+        install_packages nodejs npm || true
+        ;;
+    esac
+  fi
+
   have_command node || { echo "错误：Node.js 安装失败。"; exit 1; }
   have_command npm || { echo "错误：npm 安装失败。"; exit 1; }
+
+  if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
+    echo "警告：当前 Node.js 版本 $(node -v) 低于要求 v$NODE_MAJOR，后续构建可能失败。"
+  fi
 }
 
 install_pm2() {
