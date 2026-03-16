@@ -639,10 +639,43 @@ npm_install_with_fallback() {
   fi
 }
 
+ensure_rollup_optional_dependency() {
+  local dir="$1"
+  local check_cmd="require.resolve('@rollup/rollup-linux-x64-gnu')"
+  if (cd "$dir" && PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NODE_BIN" -e "$check_cmd") >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local rollup_opt_ver
+  rollup_opt_ver="$(
+    cd "$dir" && PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NODE_BIN" -e "try{const p=require('./node_modules/rollup/package.json');process.stdout.write((p.optionalDependencies&&p.optionalDependencies['@rollup/rollup-linux-x64-gnu'])||'')}catch(e){process.stdout.write('')}"
+  )"
+
+  if [[ -z "$rollup_opt_ver" ]]; then
+    rollup_opt_ver="$(
+      cd "$dir" && PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NODE_BIN" -e "try{const p=require('./package-lock.json');const r=p.packages&&p.packages['node_modules/rollup'];process.stdout.write((r&&r.optionalDependencies&&r.optionalDependencies['@rollup/rollup-linux-x64-gnu'])||'')}catch(e){process.stdout.write('')}"
+    )"
+  fi
+
+  if [[ -n "$rollup_opt_ver" ]]; then
+    echo "检测到 Rollup 可选依赖缺失，正在补装 @rollup/rollup-linux-x64-gnu@$rollup_opt_ver"
+    (cd "$dir" && npm_cmd install --no-save "@rollup/rollup-linux-x64-gnu@$rollup_opt_ver")
+  else
+    echo "检测到 Rollup 可选依赖缺失，正在补装 @rollup/rollup-linux-x64-gnu（自动版本）"
+    (cd "$dir" && npm_cmd install --no-save @rollup/rollup-linux-x64-gnu)
+  fi
+
+  if (cd "$dir" && PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NODE_BIN" -e "$check_cmd") >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 install_project_deps() {
   echo "[9/12] 安装 API/Web 依赖"
   npm_install_with_fallback "$API_DIR"
   npm_install_with_fallback "$WEB_DIR"
+  ensure_rollup_optional_dependency "$WEB_DIR"
 }
 
 run_prisma() {
@@ -657,7 +690,17 @@ build_project() {
   cd "$API_DIR"
   npm_cmd run build
   cd "$WEB_DIR"
-  npm_cmd run build
+  if ! npm_cmd run build; then
+    warn "Web 构建失败，尝试修复 Rollup 可选依赖后重试。"
+    ensure_rollup_optional_dependency "$WEB_DIR" || true
+    if ! npm_cmd run build; then
+      warn "重试仍失败，正在重装 Web 依赖后再次构建。"
+      rm -rf "$WEB_DIR/node_modules"
+      npm_install_with_fallback "$WEB_DIR"
+      ensure_rollup_optional_dependency "$WEB_DIR"
+      npm_cmd run build
+    fi
+  fi
 }
 
 start_services() {
