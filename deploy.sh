@@ -16,6 +16,7 @@ RUNTIME_DIR="$ROOT_DIR/.mw-runtime"
 NODE_RUNTIME_DIR="$RUNTIME_DIR/node"
 NODE_BIN="$NODE_RUNTIME_DIR/bin/node"
 NPM_BIN="$NODE_RUNTIME_DIR/bin/npm"
+NPM_CLI_JS="$NODE_RUNTIME_DIR/lib/node_modules/npm/bin/npm-cli.js"
 RUNTIME_PORTS_FILE="$RUNTIME_DIR/ports.env"
 
 API_ENV_FILE="$API_DIR/.env"
@@ -608,7 +609,15 @@ ensure_local_node_runtime() {
 }
 
 npm_cmd() {
-  "$NPM_BIN" "$@"
+  if [[ -x "$NODE_BIN" && -f "$NPM_CLI_JS" ]]; then
+    "$NODE_BIN" "$NPM_CLI_JS" "$@"
+    return
+  fi
+  if [[ -x "$NPM_BIN" ]]; then
+    "$NPM_BIN" "$@"
+    return
+  fi
+  die "本地 npm 运行时不可用，请先执行 Node 运行时安装步骤。"
 }
 
 npm_install_with_fallback() {
