@@ -265,9 +265,6 @@ dependencies_missing() {
   if ! docker_compose_available; then
     missing=1
   fi
-  if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
-    missing=1
-  fi
   if ! have_command pm2; then
     missing=1
   fi
@@ -492,12 +489,92 @@ install_nodejs() {
     esac
   fi
 
+  if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
+    echo "系统仓库版本仍偏低，尝试安装官方 Node.js 二进制..."
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+      x86_64) arch="x64" ;;
+      aarch64|arm64) arch="arm64" ;;
+      *)
+        arch=""
+        ;;
+    esac
+
+    if [[ -n "$arch" ]]; then
+      local base_url
+      base_url="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"
+      local package_name
+      package_name="$(
+        curl -fsSL "${base_url}/" \
+          | sed -n "s/.*href=\"\\(node-v[0-9.]*-linux-${arch}\\.tar\\.xz\\)\".*/\\1/p" \
+          | head -n 1
+      )"
+      if [[ -n "$package_name" ]]; then
+        local tmpdir
+        tmpdir="$(mktemp -d)"
+        if curl -fsSL "${base_url}/${package_name}" -o "${tmpdir}/node.tar.xz"; then
+          as_root tar -xJf "${tmpdir}/node.tar.xz" -C /usr/local --strip-components=1 || true
+          hash -r
+        fi
+        rm -rf "$tmpdir"
+      fi
+    fi
+  fi
+
   have_command node || { echo "错误：Node.js 安装失败。"; exit 1; }
   have_command npm || { echo "错误：npm 安装失败。"; exit 1; }
 
   if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
     echo "警告：当前 Node.js 版本 $(node -v) 低于要求 v$NODE_MAJOR，后续构建可能失败。"
   fi
+}
+
+update_git_source() {
+  if [[ "$SKIP_GIT" == "1" ]]; then
+    echo "已跳过 Git 拉取。"
+    return
+  fi
+
+  have_command git || { echo "错误：缺少 git。"; exit 1; }
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "当前目录不是 Git 仓库，跳过代码拉取。"
+    return
+  fi
+
+  local dirty
+  dirty="$(git status --porcelain --untracked-files=no || true)"
+  if [[ -n "$dirty" ]]; then
+    if [[ "$YES" == "1" ]]; then
+      echo "检测到本地未提交改动，--yes 模式下自动跳过 Git 拉取。"
+      SKIP_GIT="1"
+      return
+    fi
+
+    echo "检测到本地未提交改动："
+    git status --short
+    local force_update="n"
+    read -r -p "是否丢弃本地改动并继续更新？[y/N]: " force_update
+    case "${force_update,,}" in
+      y|yes)
+        git reset --hard
+        git clean -fd
+        ;;
+      *)
+        echo "已保留本地改动，跳过 Git 拉取。"
+        SKIP_GIT="1"
+        return
+        ;;
+    esac
+  fi
+
+  git fetch origin "$BRANCH"
+  local current_branch
+  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ "$current_branch" != "$BRANCH" ]]; then
+    git checkout "$BRANCH"
+  fi
+  git pull --ff-only origin "$BRANCH"
 }
 
 install_pm2() {
@@ -553,14 +630,7 @@ run_deploy() {
 
   echo "[1/8] 更新代码"
   cd "$ROOT_DIR"
-  if [[ "$SKIP_GIT" != "1" ]]; then
-    have_command git || { echo "错误：缺少 git。"; exit 1; }
-    git fetch origin "$BRANCH"
-    git checkout "$BRANCH"
-    git pull --ff-only origin "$BRANCH"
-  else
-    echo "已跳过 Git 拉取。"
-  fi
+  update_git_source
 
   echo "[2/8] 启动 PostgreSQL + Redis"
   if [[ "$NO_DOCKER" != "1" ]]; then
@@ -578,6 +648,11 @@ run_deploy() {
   echo "[3/8] 校验运行时目录"
   ensure_runtime_data_dirs
   ensure_api_env
+
+  if [[ "$(node_major_installed)" -lt "$NODE_MAJOR" ]]; then
+    echo "检测到 Node.js 版本低于 v$NODE_MAJOR，尝试升级..."
+    install_nodejs
+  fi
 
   if [[ "$SKIP_INSTALL" != "1" ]]; then
     echo "[4/8] 安装 API 依赖"
