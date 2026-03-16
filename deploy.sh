@@ -36,35 +36,35 @@ OS_ID=""
 
 usage() {
   cat <<'EOF'
-MindWall deploy script (first-time setup)
+MindWall 首次部署脚本
 
-Usage:
+用法:
   sudo bash deploy.sh
 
-Options:
-  --branch <name>       git branch (default: main)
-  --api-port <port>     api port (default: 3100)
-  --web-port <port>     web port (default: 3001)
-  --skip-git            skip git pull
-  --no-docker           skip docker start
-  --yes                 non-interactive mode
+参数:
+  --branch <name>       Git 分支（默认 main）
+  --api-port <port>     API 端口（默认 3100）
+  --web-port <port>     Web 端口（默认 3001）
+  --skip-git            跳过 Git 拉取
+  --no-docker           跳过 Docker 启动
+  --yes                 非交互模式
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
-      [[ $# -ge 2 ]] || { echo "ERROR: --branch requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --branch 缺少参数值"; exit 1; }
       BRANCH="$2"
       shift 2
       ;;
     --api-port)
-      [[ $# -ge 2 ]] || { echo "ERROR: --api-port requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --api-port 缺少参数值"; exit 1; }
       API_PORT="$2"
       shift 2
       ;;
     --web-port)
-      [[ $# -ge 2 ]] || { echo "ERROR: --web-port requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数值"; exit 1; }
       WEB_PORT="$2"
       shift 2
       ;;
@@ -85,7 +85,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "ERROR: unknown option $1"
+      echo "错误: 未识别参数 $1"
       usage
       exit 1
       ;;
@@ -105,12 +105,12 @@ as_root() {
 }
 
 die() {
-  echo "ERROR: $*" >&2
+  echo "错误: $*" >&2
   exit 1
 }
 
 warn() {
-  echo "WARN: $*" >&2
+  echo "警告: $*" >&2
 }
 
 validate_port() {
@@ -124,7 +124,7 @@ project_version() {
     tr -d '[:space:]' < "$VERSION_FILE"
     return
   fi
-  echo "unknown"
+  echo "未知"
 }
 
 require_root_capability() {
@@ -136,7 +136,7 @@ require_root_capability() {
     SUDO="sudo"
     return
   fi
-  die "Please run as root (or install sudo)."
+  die "请使用 root 执行，或先安装 sudo。"
 }
 
 detect_os() {
@@ -165,7 +165,7 @@ detect_pkg_manager() {
   elif have_command pacman; then
     PKG_MANAGER="pacman"
   else
-    die "No supported package manager found (apt/dnf/yum/zypper/pacman)."
+    die "未检测到支持的包管理器（apt/dnf/yum/zypper/pacman）。"
   fi
 }
 
@@ -202,7 +202,7 @@ install_packages() {
 }
 
 install_base_tools() {
-  echo "[1/12] Installing base tools"
+  echo "[1/12] 安装基础工具"
   refresh_pkg_index
   case "$PKG_MANAGER" in
     apt)
@@ -237,7 +237,7 @@ docker_compose_run() {
     as_root docker-compose -f "$COMPOSE_FILE" "$@"
     return
   fi
-  die "Docker Compose is not available."
+  die "Docker Compose 不可用。"
 }
 
 ensure_docker_mirrors() {
@@ -263,7 +263,7 @@ EOF
 }
 
 install_docker() {
-  echo "[2/12] Installing docker"
+  echo "[2/12] 安装 Docker"
   detect_pkg_manager
   detect_os
 
@@ -303,8 +303,8 @@ install_docker() {
     as_root systemctl restart docker || true
   fi
 
-  docker_engine_ready || die "Docker engine is not ready."
-  docker_compose_available || die "Docker Compose is not ready."
+  docker_engine_ready || die "Docker 引擎不可用。"
+  docker_compose_available || die "Docker Compose 不可用。"
 }
 
 version_ge() {
@@ -328,7 +328,7 @@ download_node_into_runtime() {
   case "$arch" in
     x86_64|amd64) arch="x64" ;;
     aarch64|arm64) arch="arm64" ;;
-    *) die "Unsupported CPU architecture: $arch" ;;
+    *) die "不支持的 CPU 架构: $arch" ;;
   esac
 
   local versions=(
@@ -367,30 +367,30 @@ download_node_into_runtime() {
     fi
   done
   rm -rf "$tmpdir"
-  [[ "$ok" -eq 1 ]] || die "Failed to install Node.js runtime into $NODE_RUNTIME_DIR"
+  [[ "$ok" -eq 1 ]] || die "Node.js 运行时安装失败: $NODE_RUNTIME_DIR"
 }
 
 ensure_local_node_runtime() {
-  echo "[3/12] Preparing local Node.js runtime"
+  echo "[3/12] 准备项目内 Node.js 运行时"
   prepare_runtime_dirs
   if [[ -x "$NODE_BIN" ]]; then
     local current
     current="$(node_version_of "$NODE_BIN" || true)"
     if [[ -n "$current" ]] && version_ge "$current" "$MIN_NODE_VERSION"; then
-      echo "Local Node.js runtime: v$current"
+      echo "当前本地 Node.js 运行时: v$current"
       return
     fi
   fi
 
-  echo "Installing local Node.js >= $MIN_NODE_VERSION into $NODE_RUNTIME_DIR"
+  echo "正在安装 Node.js >= $MIN_NODE_VERSION 到 $NODE_RUNTIME_DIR"
   download_node_into_runtime
 
   local installed
   installed="$(node_version_of "$NODE_BIN" || true)"
   if [[ -z "$installed" ]] || ! version_ge "$installed" "$MIN_NODE_VERSION"; then
-    die "Node.js runtime version is too low (got v${installed:-unknown}, need >= $MIN_NODE_VERSION)"
+    die "Node.js 版本过低（当前 v${installed:-未知}，要求 >= $MIN_NODE_VERSION）"
   fi
-  echo "Local Node.js installed: v$installed"
+  echo "Node.js 运行时安装完成: v$installed"
 }
 
 npm_cmd() {
@@ -402,16 +402,16 @@ pm2_cmd() {
 }
 
 ensure_local_pm2() {
-  echo "[4/12] Preparing local PM2 runtime"
+  echo "[4/12] 准备项目内 PM2 运行时"
   if [[ -x "$PM2_BIN" ]]; then
     return
   fi
   NPM_CONFIG_PREFIX="$NPM_GLOBAL_PREFIX" PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NPM_BIN" install -g pm2
-  [[ -x "$PM2_BIN" ]] || die "Failed to install local PM2."
+  [[ -x "$PM2_BIN" ]] || die "本地 PM2 安装失败。"
 }
 
 register_shortcuts() {
-  echo "[5/12] Registering helper commands"
+  echo "[5/12] 注册快捷命令"
   as_root chmod 755 "$ROOT_DIR/deploy.sh" "$ROOT_DIR/update.sh"
 
   local w1 w2
@@ -434,19 +434,19 @@ EOF
 
 update_git_source() {
   if [[ "$SKIP_GIT" == "1" ]]; then
-    echo "Skip git pull."
+    echo "已跳过 Git 拉取。"
     return
   fi
   if ! have_command git; then
-    warn "git not found, skipping git pull."
+    warn "未检测到 git，已跳过 Git 拉取。"
     return
   fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn "Not a git repo, skipping git pull."
+    warn "当前目录不是 Git 仓库，已跳过 Git 拉取。"
     return
   fi
   if ! git remote get-url origin >/dev/null 2>&1; then
-    warn "origin remote not configured, skipping git pull."
+    warn "未配置 origin 远程仓库，已跳过 Git 拉取。"
     return
   fi
 
@@ -454,10 +454,10 @@ update_git_source() {
   dirty="$(git status --porcelain || true)"
   if [[ -n "$dirty" ]]; then
     if [[ "$YES" == "1" ]]; then
-      warn "Local changes detected. --yes mode keeps changes and skips git pull."
+      warn "检测到本地改动，--yes 模式下保留改动并跳过 Git 拉取。"
       return
     fi
-    warn "Local changes detected. Keeping local changes and skipping git pull."
+    warn "检测到本地改动，保留改动并跳过 Git 拉取。"
     return
   fi
 
@@ -520,17 +520,17 @@ find_free_port() {
 }
 
 ensure_ports() {
-  echo "[6/12] Resolving ports"
+  echo "[6/12] 处理端口占用"
 
   local chosen_api chosen_web
   chosen_api="$(find_free_port "$API_PORT")"
   if [[ "$chosen_api" != "$API_PORT" ]]; then
-    warn "API port $API_PORT is occupied. Using $chosen_api instead."
+    warn "API 端口 $API_PORT 已被占用，改用 $chosen_api。"
   fi
 
   chosen_web="$(find_free_port "$WEB_PORT")"
   if [[ "$chosen_web" != "$WEB_PORT" ]]; then
-    warn "Web port $WEB_PORT is occupied. Using $chosen_web instead."
+    warn "Web 端口 $WEB_PORT 已被占用，改用 $chosen_web。"
   fi
 
   API_PORT="$chosen_api"
@@ -559,7 +559,7 @@ set_or_append_env() {
 }
 
 write_app_env_ports() {
-  echo "[7/12] Writing app env"
+  echo "[7/12] 写入应用环境配置"
   local host
   host="$(first_host_ip)"
   if [[ -z "$host" ]]; then
@@ -596,22 +596,22 @@ wait_for_container() {
     sleep 2
     waited=$((waited + 2))
   done
-  die "Container $name is not ready after ${timeout}s."
+  die "容器 $name 在 ${timeout}s 内未就绪。"
 }
 
 start_infra() {
   if [[ "$NO_DOCKER" == "1" ]]; then
-    echo "[8/12] Skip docker startup"
+    echo "[8/12] 跳过 Docker 启动"
     return
   fi
-  echo "[8/12] Starting PostgreSQL + Redis"
+  echo "[8/12] 启动 PostgreSQL + Redis"
   local ok=0
   for attempt in 1 2 3; do
     if docker_compose_run up -d; then
       ok=1
       break
     fi
-    warn "Docker startup failed (attempt $attempt)."
+    warn "Docker 启动失败，第 $attempt 次重试。"
     ensure_docker_mirrors
     if [[ "$attempt" -eq 1 ]]; then
       try_prepull_images
@@ -621,7 +621,7 @@ start_infra() {
     fi
     sleep $((attempt * 5))
   done
-  [[ "$ok" -eq 1 ]] || die "Failed to start Docker services (redis/pgvector image pull failed)."
+  [[ "$ok" -eq 1 ]] || die "Docker 服务启动失败（redis/pgvector 镜像拉取失败）。"
   wait_for_container "mindwall-postgres" 180
   wait_for_container "mindwall-redis" 90
 }
@@ -631,7 +631,7 @@ npm_install_with_fallback() {
   cd "$dir"
   if [[ -f package-lock.json ]]; then
     if ! npm_cmd ci; then
-      warn "npm ci failed in $dir, fallback to npm install."
+      warn "目录 $dir 执行 npm ci 失败，回退为 npm install。"
       npm_cmd install
     fi
   else
@@ -640,20 +640,20 @@ npm_install_with_fallback() {
 }
 
 install_project_deps() {
-  echo "[9/12] Installing API/Web dependencies"
+  echo "[9/12] 安装 API/Web 依赖"
   npm_install_with_fallback "$API_DIR"
   npm_install_with_fallback "$WEB_DIR"
 }
 
 run_prisma() {
-  echo "[10/12] Running Prisma generate + deploy"
+  echo "[10/12] 执行 Prisma 生成与迁移"
   cd "$API_DIR"
   npm_cmd run prisma:generate
   npm_cmd run prisma:deploy
 }
 
 build_project() {
-  echo "[11/12] Building API/Web"
+  echo "[11/12] 构建 API/Web"
   cd "$API_DIR"
   npm_cmd run build
   cd "$WEB_DIR"
@@ -661,7 +661,7 @@ build_project() {
 }
 
 start_services() {
-  echo "[12/12] Starting PM2 services (isolated PM2_HOME)"
+  echo "[12/12] 启动 PM2 服务（独立 PM2_HOME）"
   pm2_cmd describe mindwall-api >/dev/null 2>&1 || \
     pm2_cmd start "$NPM_BIN" --name mindwall-api --cwd "$API_DIR" -- run start:prod
   pm2_cmd restart mindwall-api --update-env
@@ -676,15 +676,15 @@ print_summary() {
   local ip
   ip="$(first_host_ip)"
   if [[ -z "$ip" ]]; then
-    ip="<server-ip>"
+    ip="<服务器IP>"
   fi
   echo
-  echo "Deploy complete: MindWall v$(project_version)"
-  echo "API port: $API_PORT"
-  echo "Web port: $WEB_PORT"
-  echo "Web URL:  http://${ip}:${WEB_PORT}"
+  echo "部署完成: MindWall v$(project_version)"
+  echo "API 端口: $API_PORT"
+  echo "Web 端口: $WEB_PORT"
+  echo "Web 地址: http://${ip}:${WEB_PORT}"
   echo "PM2_HOME: $PM2_HOME_DIR"
-  echo "Local Node: $NODE_RUNTIME_DIR"
+  echo "本地 Node 路径: $NODE_RUNTIME_DIR"
 }
 
 main() {
@@ -692,18 +692,18 @@ main() {
   detect_os
   detect_pkg_manager
 
-  validate_port "$API_PORT" || die "Invalid api port: $API_PORT"
-  validate_port "$WEB_PORT" || die "Invalid web port: $WEB_PORT"
+  validate_port "$API_PORT" || die "API 端口不合法: $API_PORT"
+  validate_port "$WEB_PORT" || die "Web 端口不合法: $WEB_PORT"
 
   cd "$ROOT_DIR"
-  echo "MindWall deploy v$(project_version)"
-  echo "Root: $ROOT_DIR"
+  echo "MindWall 首次部署 v$(project_version)"
+  echo "目录: $ROOT_DIR"
 
   install_base_tools
   if [[ "$NO_DOCKER" != "1" ]]; then
     install_docker
   else
-    echo "[2/12] Skip docker install"
+    echo "[2/12] 跳过 Docker 安装"
   fi
   ensure_local_node_runtime
   ensure_local_pm2

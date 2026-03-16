@@ -38,38 +38,38 @@ SUDO=""
 
 usage() {
   cat <<'EOF'
-MindWall update script
+MindWall 更新脚本
 
-Usage:
+用法:
   sudo bash update.sh
 
-Options:
-  --branch <name>       git branch (default: main)
-  --api-port <port>     api port (default: read from .mw-runtime/ports.env or 3100)
-  --web-port <port>     web port (default: read from .mw-runtime/ports.env or 3001)
-  --skip-git            skip git pull
-  --skip-install        skip npm install
-  --skip-migrate        skip prisma migrate deploy
-  --no-docker           skip docker startup
-  --yes                 non-interactive mode (keep local changes)
+参数:
+  --branch <name>       Git 分支（默认 main）
+  --api-port <port>     API 端口（默认读取 .mw-runtime/ports.env，否则 3100）
+  --web-port <port>     Web 端口（默认读取 .mw-runtime/ports.env，否则 3001）
+  --skip-git            跳过 Git 拉取
+  --skip-install        跳过 npm 安装
+  --skip-migrate        跳过 Prisma migrate deploy
+  --no-docker           跳过 Docker 启动
+  --yes                 非交互模式（保留本地改动）
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
-      [[ $# -ge 2 ]] || { echo "ERROR: --branch requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --branch 缺少参数值"; exit 1; }
       BRANCH="$2"
       shift 2
       ;;
     --api-port)
-      [[ $# -ge 2 ]] || { echo "ERROR: --api-port requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --api-port 缺少参数值"; exit 1; }
       API_PORT="$2"
       API_PORT_SET=1
       shift 2
       ;;
     --web-port)
-      [[ $# -ge 2 ]] || { echo "ERROR: --web-port requires a value"; exit 1; }
+      [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数值"; exit 1; }
       WEB_PORT="$2"
       WEB_PORT_SET=1
       shift 2
@@ -99,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "ERROR: unknown option $1"
+      echo "错误: 未识别参数 $1"
       usage
       exit 1
       ;;
@@ -119,12 +119,12 @@ as_root() {
 }
 
 die() {
-  echo "ERROR: $*" >&2
+  echo "错误: $*" >&2
   exit 1
 }
 
 warn() {
-  echo "WARN: $*" >&2
+  echo "警告: $*" >&2
 }
 
 validate_port() {
@@ -138,7 +138,7 @@ project_version() {
     tr -d '[:space:]' < "$VERSION_FILE"
     return
   fi
-  echo "unknown"
+  echo "未知"
 }
 
 require_root_capability() {
@@ -150,7 +150,7 @@ require_root_capability() {
     SUDO="sudo"
     return
   fi
-  die "Please run as root (or install sudo)."
+  die "请使用 root 执行，或先安装 sudo。"
 }
 
 version_ge() {
@@ -192,7 +192,7 @@ docker_compose_run() {
     as_root docker-compose -f "$COMPOSE_FILE" "$@"
     return
   fi
-  die "Docker Compose is not available."
+  die "Docker Compose 不可用。"
 }
 
 ensure_docker_mirrors() {
@@ -307,14 +307,14 @@ resolve_ports_with_conflict_guard() {
   if port_in_use "$API_PORT" && [[ "$api_owned" != "1" ]]; then
     local next_api
     next_api="$(find_free_port "$API_PORT")"
-    warn "API port $API_PORT is occupied by another service, switching to $next_api."
+    warn "API 端口 $API_PORT 被其他服务占用，切换到 $next_api。"
     API_PORT="$next_api"
   fi
 
   if port_in_use "$WEB_PORT" && [[ "$web_owned" != "1" ]]; then
     local next_web
     next_web="$(find_free_port "$WEB_PORT")"
-    warn "Web port $WEB_PORT is occupied by another service, switching to $next_web."
+    warn "Web 端口 $WEB_PORT 被其他服务占用，切换到 $next_web。"
     WEB_PORT="$next_web"
   fi
 }
@@ -330,19 +330,19 @@ ensure_local_runtime_ready() {
 
 update_git_source() {
   if [[ "$SKIP_GIT" == "1" ]]; then
-    echo "Skip git pull."
+    echo "已跳过 Git 拉取。"
     return
   fi
   if ! have_command git; then
-    warn "git not found, skipping git pull."
+    warn "未检测到 git，已跳过 Git 拉取。"
     return
   fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    warn "Not a git repo, skipping git pull."
+    warn "当前目录不是 Git 仓库，已跳过 Git 拉取。"
     return
   fi
   if ! git remote get-url origin >/dev/null 2>&1; then
-    warn "origin remote not configured, skipping git pull."
+    warn "未配置 origin 远程仓库，已跳过 Git 拉取。"
     return
   fi
 
@@ -350,10 +350,10 @@ update_git_source() {
   dirty="$(git status --porcelain || true)"
   if [[ -n "$dirty" ]]; then
     if [[ "$YES" == "1" ]]; then
-      warn "Local changes detected. --yes mode keeps changes and skips git pull."
+      warn "检测到本地改动，--yes 模式保留改动并跳过 Git 拉取。"
       return
     fi
-    warn "Local changes detected. Keeping local changes and skipping git pull."
+    warn "检测到本地改动，保留改动并跳过 Git 拉取。"
     return
   fi
 
@@ -386,22 +386,22 @@ wait_for_container() {
     sleep 2
     waited=$((waited + 2))
   done
-  die "Container $name is not ready after ${timeout}s."
+  die "容器 $name 在 ${timeout}s 内未就绪。"
 }
 
 start_infra() {
   if [[ "$NO_DOCKER" == "1" ]]; then
-    echo "[2/9] Skip docker startup"
+    echo "[2/9] 跳过 Docker 启动"
     return
   fi
-  echo "[2/9] Starting PostgreSQL + Redis"
+  echo "[2/9] 启动 PostgreSQL + Redis"
   local ok=0
   for attempt in 1 2 3; do
     if docker_compose_run up -d; then
       ok=1
       break
     fi
-    warn "Docker startup failed (attempt $attempt)."
+    warn "Docker 启动失败，第 $attempt 次重试。"
     ensure_docker_mirrors
     if [[ "$attempt" -eq 1 ]]; then
       try_prepull_images
@@ -411,7 +411,7 @@ start_infra() {
     fi
     sleep $((attempt * 5))
   done
-  [[ "$ok" -eq 1 ]] || die "Failed to start Docker services (redis/pgvector image pull failed)."
+  [[ "$ok" -eq 1 ]] || die "Docker 服务启动失败（redis/pgvector 镜像拉取失败）。"
   wait_for_container "mindwall-postgres" 180
   wait_for_container "mindwall-redis" 90
 }
@@ -421,7 +421,7 @@ npm_install_with_fallback() {
   cd "$dir"
   if [[ -f package-lock.json ]]; then
     if ! npm_cmd ci; then
-      warn "npm ci failed in $dir, fallback to npm install."
+      warn "目录 $dir 执行 npm ci 失败，回退为 npm install。"
       npm_cmd install
     fi
   else
@@ -467,13 +467,13 @@ print_summary() {
   local ip
   ip="$(first_host_ip)"
   if [[ -z "$ip" ]]; then
-    ip="<server-ip>"
+    ip="<服务器IP>"
   fi
   echo
-  echo "Update complete: MindWall v$(project_version)"
-  echo "API port: $API_PORT"
-  echo "Web port: $WEB_PORT"
-  echo "Web URL:  http://${ip}:${WEB_PORT}"
+  echo "更新完成: MindWall v$(project_version)"
+  echo "API 端口: $API_PORT"
+  echo "Web 端口: $WEB_PORT"
+  echo "Web 地址: http://${ip}:${WEB_PORT}"
   echo "PM2_HOME: $PM2_HOME_DIR"
 }
 
@@ -481,15 +481,15 @@ main() {
   require_root_capability
   cd "$ROOT_DIR"
 
-  echo "MindWall update v$(project_version)"
-  echo "Root: $ROOT_DIR"
+  echo "MindWall 更新部署 v$(project_version)"
+  echo "目录: $ROOT_DIR"
 
   load_saved_ports
-  validate_port "$API_PORT" || die "Invalid api port: $API_PORT"
-  validate_port "$WEB_PORT" || die "Invalid web port: $WEB_PORT"
+  validate_port "$API_PORT" || die "API 端口不合法: $API_PORT"
+  validate_port "$WEB_PORT" || die "Web 端口不合法: $WEB_PORT"
 
   if ! ensure_local_runtime_ready; then
-    warn "Local runtime is missing or outdated. Running deploy.sh first."
+    warn "项目本地运行时缺失或版本过低，先执行 deploy.sh。"
     local deploy_args=(
       "--branch" "$BRANCH"
       "--api-port" "$API_PORT"
@@ -506,49 +506,49 @@ main() {
   fi
 
   if [[ "$NO_DOCKER" != "1" ]]; then
-    docker_engine_ready || die "Docker is not ready."
-    docker_compose_available || die "Docker Compose is not ready."
+    docker_engine_ready || die "Docker 不可用。"
+    docker_compose_available || die "Docker Compose 不可用。"
   fi
 
-  echo "[1/9] Updating source"
+  echo "[1/9] 更新代码"
   update_git_source
 
   start_infra
 
-  echo "[3/9] Ensuring runtime files"
+  echo "[3/9] 检查运行配置"
   ensure_runtime_files
   resolve_ports_with_conflict_guard
   write_app_env_ports
 
   if [[ "$SKIP_INSTALL" != "1" ]]; then
-    echo "[4/9] Installing API/Web dependencies"
+    echo "[4/9] 安装 API/Web 依赖"
     npm_install_with_fallback "$API_DIR"
     npm_install_with_fallback "$WEB_DIR"
   else
-    echo "[4/9] Skip dependency install"
+    echo "[4/9] 跳过依赖安装"
   fi
 
-  echo "[5/9] Prisma generate"
+  echo "[5/9] 执行 Prisma 生成"
   cd "$API_DIR"
   npm_cmd run prisma:generate
 
   if [[ "$SKIP_MIGRATE" != "1" ]]; then
-    echo "[6/9] Prisma migrate deploy"
+    echo "[6/9] 执行 Prisma 迁移"
     npm_cmd run prisma:deploy
   else
-    echo "[6/9] Skip prisma migrate deploy"
+    echo "[6/9] 跳过 Prisma 迁移"
   fi
 
-  echo "[7/9] Building API/Web"
+  echo "[7/9] 构建 API/Web"
   cd "$API_DIR"
   npm_cmd run build
   cd "$WEB_DIR"
   npm_cmd run build
 
-  echo "[8/9] Restarting PM2 services"
+  echo "[8/9] 重启 PM2 服务"
   start_services
 
-  echo "[9/9] Done"
+  echo "[9/9] 完成"
   print_summary
 }
 
