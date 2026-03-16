@@ -24,8 +24,8 @@ WEB_ENV_PROD_FILE="$WEB_DIR/.env.production.local"
 SYSTEMD_API_SERVICE_FILE="/etc/systemd/system/mindwall-api.service"
 NGINX_CONF_FILE="/etc/nginx/conf.d/mindwall.conf"
 
-MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
-LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-20.19.5}"
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-22.14.0}"
+LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-22.14.0}"
 
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 if [[ -z "$CURRENT_BRANCH" || "$CURRENT_BRANCH" == "HEAD" ]]; then
@@ -596,6 +596,7 @@ ensure_local_node_runtime() {
 
   if [[ -n "$current" ]] && version_ge "$current" "$MIN_NODE_VERSION"; then
     echo "  已就绪: v$current"
+    export PATH="$NODE_RUNTIME_DIR/bin:$PATH"
     return
   fi
 
@@ -606,6 +607,7 @@ ensure_local_node_runtime() {
     die "本地 Node.js 安装失败（要求 >= $MIN_NODE_VERSION）。"
   fi
   echo "  已安装: v$installed"
+  export PATH="$NODE_RUNTIME_DIR/bin:$PATH"
 }
 
 npm_cmd() {
