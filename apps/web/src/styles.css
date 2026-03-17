@@ -267,8 +267,6 @@ a {
 .btn-primary:not(:disabled):hover {
   box-shadow: 0 6px 24px rgba(255, 95, 60, 0.35);
 }
-  color: #fff;
-}
 
 .btn-secondary {
   background: linear-gradient(135deg, #3baa85 0%, #2e9876 100%);

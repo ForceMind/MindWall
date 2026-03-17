@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 if head -n 1 "$0" | grep -q $'\r'; then
   sed -i 's/\r$//' "$0"
   exec bash "$0" "$@"
@@ -396,7 +396,7 @@ install_system_packages() {
     return 0
   fi
 
-  log_step "[1/7] 安装基础工具"
+  log_step "[1/8] 安装基础工具"
   pkg_update_cache
   case "$PKG_MANAGER" in
     apt)
@@ -420,7 +420,7 @@ ensure_docker_engine() {
     return 0
   fi
 
-  log_step "[2/7] 准备 Docker（PostgreSQL + Redis）"
+  log_step "[2/8] 准备 Docker（PostgreSQL + Redis）"
 
   if have_cmd docker && as_root docker info >/dev/null 2>&1; then
     log_info "Docker 已可用"
@@ -547,7 +547,7 @@ install_local_node_runtime() {
 }
 
 ensure_node_runtime() {
-  log_step "[3/7] 准备本地 Node.js 运行时"
+  log_step "[3/8] 准备本地 Node.js 运行时"
 
   local current=""
   if [[ -x "$NODE_BIN" ]]; then
@@ -603,7 +603,7 @@ random_alnum() {
 }
 
 write_api_env() {
-  log_step "[4/7] 写入 API/Web 环境配置"
+  log_step "[6/8] 写入环境配置 + 启动数据库"
 
   local db_url
   db_url="postgresql://mindwall:mindwall@127.0.0.1:${PG_PORT}/mindwall?schema=public"
@@ -636,9 +636,10 @@ write_api_env() {
   if [[ -z "$ADMIN_PASSWORD" ]]; then
     ADMIN_PASSWORD="$existing_admin_pass"
   fi
-  if [[ -z "$ADMIN_PASSWORD" ]]; then
+  # 如果密码仍为空或是不安全的默认值，自动生成
+  if [[ -z "$ADMIN_PASSWORD" || "$ADMIN_PASSWORD" == "change-this-admin-password" || "$ADMIN_PASSWORD" == "mindwall-admin" ]]; then
     ADMIN_PASSWORD="mw$(random_alnum 12)"
-    log_warn "未检测到管理员密码，已生成随机密码: ${BOLD}${ADMIN_PASSWORD}${NC}"
+    log_warn "管理员密码未设置或为默认值，已自动生成: ${BOLD}${ADMIN_PASSWORD}${NC}"
   fi
 
   local admin_token
@@ -692,7 +693,7 @@ EOF
 }
 
 update_code() {
-  log_step "[5/7] 更新代码"
+  log_step "[4/8] 更新代码"
 
   if [[ "$SKIP_GIT" == "1" ]]; then
     log_info "跳过 Git 更新（--skip-git）"
@@ -765,8 +766,6 @@ stop_legacy_mindwall_processes() {
 }
 
 check_ports() {
-  log_step "[6/7] 端口占用检查"
-
   validate_port "$API_PORT" || die "API 端口非法: $API_PORT"
   validate_port "$WEB_PORT" || die "Web 端口非法: $WEB_PORT"
   validate_port "$PG_PORT" || die "PG 端口非法: $PG_PORT"
@@ -788,7 +787,10 @@ check_ports() {
 }
 
 install_and_build() {
-  log_step "[7/7] 安装依赖、迁移数据库、构建"
+  log_step "[7/8] 安装依赖、迁移数据库、构建"
+
+  # 限制 Node 构建内存，防止 OOM 影响服务器其他应用
+  export NODE_OPTIONS="--max-old-space-size=512"
 
   npm_install_dir "$API_DIR"
   (cd "$API_DIR" && npm_exec run prisma:generate)
@@ -804,6 +806,8 @@ install_and_build() {
     ensure_rollup_native
     (cd "$WEB_DIR" && npm_exec run build)
   fi
+
+  unset NODE_OPTIONS
 }
 
 write_web_server() {
@@ -1081,22 +1085,31 @@ print_summary() {
   host="$(resolve_host_for_display)"
 
   echo
-  echo -e "${GREEN}${BOLD}部署完成: MindWall v$(project_version)${NC}"
-  echo "API 端口: $API_PORT"
-  echo "Web 端口: $WEB_PORT"
-  echo "Web 地址: http://${host}:${WEB_PORT}"
-  echo "本地 Node 路径: $NODE_RUNTIME_DIR"
-  echo "服务状态命令: systemctl status mindwall-api mindwall-web"
-  echo "日志命令: journalctl -u mindwall-api -f / journalctl -u mindwall-web -f"
-
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}${BOLD}  MindWall v$(project_version) 部署完成${NC}"
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
+  echo -e "  模式:      ${GREEN}独立模式${NC}（不修改 Nginx / 不碰其他服务）"
   if [[ -n "$PUBLIC_HOST" ]]; then
-    echo "公网访问地址: https://$(normalize_public_host "$PUBLIC_HOST")"
-  else
-    echo "提示: 如需展示公网域名，请加参数 --public-host your.domain.com"
+    echo -e "  公网地址:  ${CYAN}https://$(normalize_public_host "$PUBLIC_HOST")${NC}"
   fi
-
-  echo "管理员账号: $ADMIN_USERNAME"
-  echo "管理员密码: $ADMIN_PASSWORD"
+  echo -e "  Web 内网:  ${CYAN}http://${host}:${WEB_PORT}${NC}"
+  echo -e "  API 端口:  $API_PORT (仅 127.0.0.1)"
+  echo -e "  Web 端口:  $WEB_PORT (0.0.0.0)"
+  echo
+  echo -e "  ${YELLOW}管理后台:${NC}  ${CYAN}https://$(normalize_public_host "${PUBLIC_HOST:-${host}:${WEB_PORT}}")/admin/login${NC}"
+  echo -e "  ${YELLOW}管理员:${NC}    ${ADMIN_USERNAME}"
+  echo -e "  ${YELLOW}密码:${NC}      ${BOLD}${ADMIN_PASSWORD}${NC}  ← ${RED}请立即记录${NC}"
+  echo
+  echo -e "  命令:  ${CYAN}mw status${NC}   查看状态"
+  echo -e "         ${CYAN}mw logs${NC}     查看日志"
+  echo -e "         ${CYAN}mw restart${NC}  重启"
+  echo -e "         ${CYAN}mw menu${NC}     交互菜单"
+  echo
+  if [[ -z "$PUBLIC_HOST" ]]; then
+    echo -e "  ${YELLOW}提示:${NC} 域名访问请重新部署并输入公网域名，或使用 --public-host"
+  fi
+  echo -e "  ${YELLOW}提示:${NC} Nginx 反代配置参考: infra/mindwall-nginx.conf.template"
+  echo
 }
 
 main() {
@@ -1109,6 +1122,12 @@ main() {
   detect_pkg_manager
   load_saved_ports
 
+  # 先交互，后安装 — 不让用户等完 dnf 才能输入
+  interactive_config
+
+  log_info "端口分配: API=$API_PORT  Web=$WEB_PORT  PG=$PG_PORT  Redis=$REDIS_PORT"
+  [[ -n "$PUBLIC_HOST" ]] && log_info "域名: $PUBLIC_HOST（CORS 已自动包含）"
+
   install_system_packages
   ensure_docker_engine
   ensure_node_runtime
@@ -1116,6 +1135,8 @@ main() {
   update_code
 
   backup_runtime_files
+
+  # 停止 MindWall 自己的服务（绝不碰其他进程）
   stop_mindwall_services
   stop_legacy_mindwall_processes
   check_ports
@@ -1127,6 +1148,73 @@ main() {
   start_services
   register_mw_command
   print_summary
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  交互式配置 — 询问公网域名和管理员凭据
+# ═══════════════════════════════════════════════════════════════
+interactive_config() {
+  # 非交互模式 (--yes) 跳过
+  if [[ "$YES" == "1" ]]; then
+    return 0
+  fi
+
+  # 不在终端中运行（如管道），跳过
+  if [[ ! -t 0 ]]; then
+    return 0
+  fi
+
+  echo
+
+  # ── 公网域名 ──
+  if [[ -z "$PUBLIC_HOST" ]]; then
+    echo -e "${CYAN}[?]${NC} 你的公网域名是什么？（如 mindwall.example.com）"
+    echo -e "    用于 CORS 允许域名访问，直接回车跳过"
+    read -r -p "    域名: " input_host
+    if [[ -n "$input_host" ]]; then
+      PUBLIC_HOST="$(normalize_public_host "$input_host")"
+      log_info "公网域名: $PUBLIC_HOST"
+    fi
+  else
+    log_info "公网域名（已保存）: $PUBLIC_HOST"
+  fi
+
+  # ── 管理员凭据 ──
+  local existing_pw=""
+  if [[ -f "$API_ENV_FILE" ]]; then
+    existing_pw="$(read_env_value "$API_ENV_FILE" "ADMIN_PASSWORD" "")"
+  fi
+
+  # 如果密码为空或是默认值，才提示设置
+  if [[ -z "$existing_pw" || "$existing_pw" == "change-this-admin-password" || "$existing_pw" == "mindwall-admin" ]]; then
+    echo
+    echo -e "${CYAN}[?]${NC} 设置管理后台账号密码"
+
+    read -r -p "    管理员用户名（默认 admin）: " input_user
+    if [[ -n "$input_user" ]]; then
+      ADMIN_USERNAME="$input_user"
+    fi
+
+    while true; do
+      read -r -s -p "    管理员密码（回车自动生成）: " input_pw
+      echo
+      if [[ -n "$input_pw" ]]; then
+        if (( ${#input_pw} < 6 )); then
+          log_warn "密码至少 6 位，请重新输入"
+          continue
+        fi
+        ADMIN_PASSWORD="$input_pw"
+      else
+        ADMIN_PASSWORD="mw$(random_alnum 12)"
+        echo -e "    ${GREEN}已自动生成密码:${NC} ${BOLD}${ADMIN_PASSWORD}${NC}"
+      fi
+      break
+    done
+  else
+    log_info "管理员密码已配置（如需修改请编辑 $API_ENV_FILE）"
+  fi
+
+  echo
 }
 
 main "$@"
