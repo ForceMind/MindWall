@@ -22,31 +22,6 @@ let SandboxController = class SandboxController {
     constructor(sandboxService) {
         this.sandboxService = sandboxService;
     }
-    async getMatchMessages(matchId, userId, limit) {
-        const parsedLimit = Number(limit);
-        const normalizedLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
-            ? Math.round(parsedLimit)
-            : 50;
-        return this.sandboxService.getMatchMessages(matchId, userId?.trim() || null, normalizedLimit);
-    }
-    async getWallState(matchId, userId) {
-        const normalizedUserId = userId?.trim();
-        if (!normalizedUserId) {
-            throw new common_1.BadRequestException('user_id is required.');
-        }
-        return this.sandboxService.getWallState(matchId, normalizedUserId);
-    }
-    async submitWallDecision(matchId, body) {
-        const userId = body.user_id?.trim();
-        if (!userId) {
-            throw new common_1.BadRequestException('user_id is required.');
-        }
-        return this.sandboxService.submitWallDecision({
-            matchId,
-            userId,
-            accept: body.accept === true,
-        });
-    }
     async getMyMatchMessages(user, matchId, limit) {
         const parsedLimit = Number(limit);
         const normalizedLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
@@ -66,31 +41,6 @@ let SandboxController = class SandboxController {
     }
 };
 exports.SandboxController = SandboxController;
-__decorate([
-    (0, common_1.Get)('matches/:matchId/messages'),
-    __param(0, (0, common_1.Param)('matchId')),
-    __param(1, (0, common_1.Query)('user_id')),
-    __param(2, (0, common_1.Query)('limit')),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String]),
-    __metadata("design:returntype", Promise)
-], SandboxController.prototype, "getMatchMessages", null);
-__decorate([
-    (0, common_1.Get)('matches/:matchId/wall-state'),
-    __param(0, (0, common_1.Param)('matchId')),
-    __param(1, (0, common_1.Query)('user_id')),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
-    __metadata("design:returntype", Promise)
-], SandboxController.prototype, "getWallState", null);
-__decorate([
-    (0, common_1.Post)('matches/:matchId/wall-decision'),
-    __param(0, (0, common_1.Param)('matchId')),
-    __param(1, (0, common_1.Body)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
-    __metadata("design:returntype", Promise)
-], SandboxController.prototype, "submitWallDecision", null);
 __decorate([
     (0, common_1.Get)('me/matches/:matchId/messages'),
     (0, common_1.UseGuards)(auth_guard_1.SessionAuthGuard),

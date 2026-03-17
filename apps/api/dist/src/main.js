@@ -7,6 +7,33 @@ const app_module_1 = require("./app.module");
 const global_http_exception_filter_1 = require("./system/foundation/http/global-http-exception.filter");
 const http_logging_interceptor_1 = require("./system/foundation/http/http-logging.interceptor");
 const request_context_middleware_1 = require("./system/foundation/http/request-context.middleware");
+function normalizeOrigin(value) {
+    if (!value || !value.trim()) {
+        return null;
+    }
+    try {
+        const parsed = new URL(value.trim());
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return null;
+        }
+        const protocol = parsed.protocol.toLowerCase();
+        const hostname = parsed.hostname.toLowerCase();
+        const port = parsed.port;
+        return `${protocol}//${hostname}${port ? `:${port}` : ''}`;
+    }
+    catch {
+        return null;
+    }
+}
+function parseCsvOrigins(raw) {
+    if (!raw) {
+        return [];
+    }
+    return raw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
 function isLocalDevOrigin(origin) {
     try {
         const parsed = new URL(origin);
@@ -39,21 +66,33 @@ async function bootstrap() {
     app.enableShutdownHooks();
     const adminConfigService = app.get(admin_config_service_1.AdminConfigService);
     const aiConfig = await adminConfigService.getAiConfig();
-    const allowedOrigins = new Set([
+    const rawAllowedOrigins = [
         aiConfig.webOrigin,
         process.env.WEB_ORIGIN,
+        process.env.PUBLIC_HOST ? `http://${process.env.PUBLIC_HOST}` : undefined,
+        process.env.PUBLIC_HOST ? `https://${process.env.PUBLIC_HOST}` : undefined,
+        ...parseCsvOrigins(process.env.CORS_ALLOWED_ORIGINS),
         'http://localhost:3000',
         'http://localhost:3001',
         'http://127.0.0.1:3000',
         'http://127.0.0.1:3001',
-    ].filter((item) => Boolean(item && item.trim())));
+    ].filter((item) => Boolean(item && item.trim()));
+    const allowedOrigins = new Set();
+    for (const item of rawAllowedOrigins) {
+        const normalized = normalizeOrigin(item);
+        if (normalized) {
+            allowedOrigins.add(normalized);
+        }
+    }
     app.enableCors({
         origin: (origin, callback) => {
             if (!origin) {
                 callback(null, true);
                 return;
             }
-            if (allowedOrigins.has(origin) || isLocalDevOrigin(origin)) {
+            const normalizedOrigin = normalizeOrigin(origin);
+            if ((normalizedOrigin && allowedOrigins.has(normalizedOrigin)) ||
+                isLocalDevOrigin(origin)) {
                 callback(null, true);
                 return;
             }
@@ -61,7 +100,7 @@ async function bootstrap() {
         },
         credentials: true,
     });
-    await app.listen(process.env.PORT ?? 3100);
+    await app.listen(process.env.PORT ?? 3100, '127.0.0.1');
 }
 bootstrap();
 //# sourceMappingURL=main.js.map

@@ -982,9 +982,14 @@ write_api_env() {
   host="$(resolve_public_host)"
   local web_origin
   web_origin="$(build_web_origin "$host")"
+  local cors_allowed="$web_origin"
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    cors_allowed="https://$PUBLIC_HOST,http://$PUBLIC_HOST,$web_origin"
+  fi
 
   set_env_value "$API_ENV_FILE" "PORT" "$API_PORT"
   set_env_value "$API_ENV_FILE" "WEB_ORIGIN" "$web_origin"
+  set_env_value "$API_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$cors_allowed"
   set_env_value "$API_ENV_FILE" "APP_VERSION" "$(project_version)"
 
   if ! grep -qE '^DATABASE_URL=' "$API_ENV_FILE"; then

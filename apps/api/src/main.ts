@@ -6,6 +6,34 @@ import { GlobalHttpExceptionFilter } from './system/foundation/http/global-http-
 import { HttpLoggingInterceptor } from './system/foundation/http/http-logging.interceptor';
 import { requestContextMiddleware } from './system/foundation/http/request-context.middleware';
 
+function normalizeOrigin(value: string | undefined | null) {
+  if (!value || !value.trim()) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    const protocol = parsed.protocol.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase();
+    const port = parsed.port;
+    return `${protocol}//${hostname}${port ? `:${port}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
+function parseCsvOrigins(raw: string | undefined) {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function isLocalDevOrigin(origin: string) {
   try {
     const parsed = new URL(origin);
@@ -44,18 +72,24 @@ async function bootstrap() {
 
   const adminConfigService = app.get(AdminConfigService);
   const aiConfig = await adminConfigService.getAiConfig();
-  const allowedOrigins = new Set(
-    [
+  const rawAllowedOrigins = [
       aiConfig.webOrigin,
       process.env.WEB_ORIGIN,
       process.env.PUBLIC_HOST ? `http://${process.env.PUBLIC_HOST}` : undefined,
       process.env.PUBLIC_HOST ? `https://${process.env.PUBLIC_HOST}` : undefined,
+      ...parseCsvOrigins(process.env.CORS_ALLOWED_ORIGINS),
       'http://localhost:3000',
       'http://localhost:3001',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:3001',
-    ].filter((item): item is string => Boolean(item && item.trim())),
-  );
+    ].filter((item): item is string => Boolean(item && item.trim()));
+  const allowedOrigins = new Set<string>();
+  for (const item of rawAllowedOrigins) {
+    const normalized = normalizeOrigin(item);
+    if (normalized) {
+      allowedOrigins.add(normalized);
+    }
+  }
 
   app.enableCors({
     origin: (
@@ -67,7 +101,11 @@ async function bootstrap() {
         return;
       }
 
-      if (allowedOrigins.has(origin) || isLocalDevOrigin(origin)) {
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (
+        (normalizedOrigin && allowedOrigins.has(normalizedOrigin)) ||
+        isLocalDevOrigin(origin)
+      ) {
         callback(null, true);
         return;
       }
