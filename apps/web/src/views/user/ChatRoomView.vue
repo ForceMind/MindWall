@@ -316,8 +316,16 @@ function handleSocketEvent(event: SandboxInbound) {
     return;
   }
 
-  if (type === 'closed') {
-    pageError.value = '聊天连接已断开，请稍后重试。';
+  if (type === 'peer_offline') {
+    pageError.value = '对方不在线';
+    return;
+  }
+
+  if (type === 'peer_online') {
+    if (pageError.value === '对方不在线') {
+      pageError.value = '';
+    }
+    return;
   }
 }
 

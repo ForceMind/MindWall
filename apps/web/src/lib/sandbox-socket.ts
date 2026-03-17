@@ -15,16 +15,28 @@ export class SandboxSocket {
   private socket: WebSocket | null = null;
   private listeners = new Set<Listener>();
   private queue: string[] = [];
+  private userId: string | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private intentionallyClosed = false;
 
   connect(userId: string) {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) {
       return;
     }
+    this.userId = userId;
+    this.intentionallyClosed = false;
+    this.doConnect();
+  }
+
+  private doConnect() {
+    if (!this.userId) return;
 
     this.socket = new WebSocket(buildSocketUrl());
 
     this.socket.addEventListener('open', () => {
-      this.send({ type: 'auth', user_id: userId });
+      this.reconnectAttempts = 0;
+      this.send({ type: 'auth', user_id: this.userId });
       this.flushQueue();
     });
 
@@ -38,13 +50,27 @@ export class SandboxSocket {
     });
 
     this.socket.addEventListener('error', () => {
-      this.emit({ type: 'error', message: '聊天连接异常，请稍后重试。' });
+      // Suppress — close event will handle reconnect
     });
 
     this.socket.addEventListener('close', () => {
-      this.emit({ type: 'closed' });
       this.socket = null;
+      if (this.intentionallyClosed) return;
+      this.scheduleReconnect();
     });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectAttempts += 1;
+    // Exponential backoff: 1s, 2s, 4s, 8s, max 15s
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 15000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.intentionallyClosed && this.userId) {
+        this.doConnect();
+      }
+    }, delay);
   }
 
   onEvent(listener: Listener) {
@@ -55,11 +81,18 @@ export class SandboxSocket {
   }
 
   close() {
+    this.intentionallyClosed = true;
     this.queue = [];
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.socket) {
       this.socket.close();
       this.socket = null;
     }
+    this.userId = null;
+    this.reconnectAttempts = 0;
   }
 
   joinMatch(matchId: string) {

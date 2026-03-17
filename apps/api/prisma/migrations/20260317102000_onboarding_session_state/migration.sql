@@ -1,8 +1,15 @@
+-- CreateEnum (if not exists)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OnboardingSessionStatus') THEN
+    CREATE TYPE "OnboardingSessionStatus" AS ENUM ('in_progress', 'completed', 'blocked');
+  END IF;
+END $$;
+
 -- CreateTable
 CREATE TABLE "onboarding_interview_sessions" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'in_progress',
+    "status" "OnboardingSessionStatus" NOT NULL DEFAULT 'in_progress',
     "answer_count" INTEGER NOT NULL DEFAULT 0,
     "total_questions" INTEGER NOT NULL DEFAULT 4,
     "invalid_attempt_count" INTEGER NOT NULL DEFAULT 0,
@@ -25,10 +32,3 @@ ON "onboarding_interview_sessions"("status", "updated_at");
 ALTER TABLE "onboarding_interview_sessions"
 ADD CONSTRAINT "onboarding_interview_sessions_user_id_fkey"
 FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- CreateEnum (if not exists)
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OnboardingSessionStatus') THEN
-    CREATE TYPE "OnboardingSessionStatus" AS ENUM ('in_progress', 'completed', 'blocked');
-  END IF;
-END $$;

@@ -142,7 +142,7 @@ export class CompanionService {
       '9) 语气要自然随意，不要过于正式或煽情，像微信聊天而不是写作文。',
       '10) 用词要口语化，避免书面语和成语堆砌。比如用"挺好的"而不是"甚好"。',    ].join('\n');
 
-    const prompt = [
+    const systemPrompt = [
       personaBasePrompt,
       '',
       replyBasePrompt,
@@ -164,11 +164,31 @@ export class CompanionService {
       `城市: ${profile?.city || '未设置'}`,
       `用户公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
       '',
-      '对话历史:',
-      history.map((item) => `${item.role}: ${item.text}`).join('\n'),
-      '',
-      '请只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
+      '回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
+      '绝对不要重复之前已经说过的话，每次回复必须有新内容。如果聊天陷入停滞，主动换一个话题。',
     ].join('\n');
+
+    // Build proper messages array with real conversation turns
+    const chatMessages: Array<{ role: string; content: string }> = [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
+    ];
+
+    // Add conversation history as separate user/assistant messages
+    for (const turn of history.slice(0, -1)) {
+      chatMessages.push({
+        role: turn.role === 'assistant' ? 'assistant' : 'user',
+        content: turn.text,
+      });
+    }
+
+    // The last user message as the final user turn
+    chatMessages.push({
+      role: 'user',
+      content: lastUserMessage,
+    });
 
     if (this.isIdentityProbe(lastUserMessage)) {
       return {
@@ -179,7 +199,7 @@ export class CompanionService {
       };
     }
 
-    const aiReply = await this.callOpenAi(userId, prompt, 'simulation.reply', 'simulation.reply');
+    const aiReply = await this.callOpenAi(userId, chatMessages, 'simulation.reply', 'simulation.reply');
     const fallbackReply =
       this.buildFallbackReply(
         lastUserMessage,
@@ -367,7 +387,7 @@ export class CompanionService {
 
   private async callOpenAi(
     userId: string,
-    prompt: string,
+    messages: Array<{ role: string; content: string }>,
     feature: string,
     promptKey: string,
   ) {
@@ -389,17 +409,7 @@ export class CompanionService {
         body: JSON.stringify({
           model: aiConfig.openaiModel,
           temperature: 0.85,
-          messages: [
-            {
-              role: 'system',
-              content:
-                '你是一个真实的年轻人，正在和一个刚认识的人聊天。用微信聊天的语气说话，口语化、自然、随意。绝不能暴露自己是AI/模型/系统/虚拟角色。',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
+          messages,
         }),
         },
       );

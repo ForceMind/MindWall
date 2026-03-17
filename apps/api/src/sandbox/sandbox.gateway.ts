@@ -204,6 +204,9 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
     const wallState = await this.sandboxService.getWallState(matchId, state.userId);
     state.matchId = matchId;
 
+    // Check if counterpart is online (has active connections)
+    const counterpartOnline = this.isUserOnline(info.counterpart_user_id);
+
     this.send(clientId, {
       type: 'join_ok',
       match_id: matchId,
@@ -216,6 +219,21 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
       counterpart_accepted: wallState.counterpartAccepted,
       counterpart_profile: wallState.counterpartProfile,
       self_profile: wallState.selfProfile,
+    });
+
+    // Notify peer online/offline status
+    if (!counterpartOnline) {
+      this.send(clientId, {
+        type: 'peer_offline',
+        match_id: matchId,
+      });
+    }
+
+    // Notify counterpart that this user is now online
+    this.sendToUser(info.counterpart_user_id, {
+      type: 'peer_online',
+      match_id: matchId,
+      user_id: state.userId,
     });
   }
 
@@ -508,10 +526,39 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
     if (!state) {
       return;
     }
+
+    // Notify counterpart that this user went offline
+    if (state.userId && state.matchId) {
+      this.notifyPeerOffline(state.userId, state.matchId);
+    }
+
     if (state.userId) {
       this.removeUserConnection(state.userId, clientId);
     }
     this.connections.delete(clientId);
     this.logger.debug(`WebSocket disconnected: ${clientId}`);
+  }
+
+  private isUserOnline(userId: string): boolean {
+    const set = this.userConnections.get(userId);
+    return !!set && set.size > 0;
+  }
+
+  private notifyPeerOffline(disconnectedUserId: string, matchId: string) {
+    // Find counterpart: look through all connections for someone in the same match
+    for (const [, connState] of this.connections) {
+      if (
+        connState.matchId === matchId &&
+        connState.userId &&
+        connState.userId !== disconnectedUserId
+      ) {
+        this.sendToUser(connState.userId, {
+          type: 'peer_offline',
+          match_id: matchId,
+          user_id: disconnectedUserId,
+        });
+        break;
+      }
+    }
   }
 }
