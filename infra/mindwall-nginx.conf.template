@@ -1,0 +1,97 @@
+# MindWall Nginx 反向代理配置模板
+# =================================
+# 如果你需要通过 Nginx 代理 MindWall（使用 80/443 端口），
+# 可以参考此模板手动配置。
+#
+# ⚠️ deploy.sh 不会自动修改 Nginx 配置，你需要手动操作：
+#
+# 1. 复制此文件到 Nginx 配置目录:
+#    sudo cp infra/mindwall-nginx.conf.template /etc/nginx/conf.d/mindwall.conf
+#
+# 2. 编辑 /etc/nginx/conf.d/mindwall.conf:
+#    - 替换 YOUR_DOMAIN_OR_IP 为你的域名或公网 IP
+#    - 替换 3001 为实际的 Web 端口（如果你修改了默认值）
+#    - 替换 3100 为实际的 API 端口（如果你修改了默认值）
+#
+# 3. 测试并重载:
+#    sudo nginx -t && sudo systemctl reload nginx
+#
+# 4. 如果启用此配置，可以将 MindWall Web 端口改为非默认端口
+#    （因为 Nginx 会监听 80/443 并代理到内部端口）
+
+server {
+    listen 80;
+    server_name YOUR_DOMAIN_OR_IP;
+
+    client_max_body_size 20m;
+
+    # API 反向代理
+    location /api/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:3100/;
+    }
+
+    # WebSocket 代理
+    location /ws/ {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:3100/ws/;
+    }
+
+    # 前端静态代理（转发到内建 Web 服务器）
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:3001;
+    }
+}
+
+# HTTPS 配置（如需 SSL，取消注释并配置证书）
+# server {
+#     listen 443 ssl http2;
+#     server_name YOUR_DOMAIN_OR_IP;
+#
+#     ssl_certificate     /path/to/fullchain.pem;
+#     ssl_certificate_key /path/to/privkey.pem;
+#
+#     client_max_body_size 20m;
+#
+#     location /api/ {
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_pass http://127.0.0.1:3100/;
+#     }
+#
+#     location /ws/ {
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_pass http://127.0.0.1:3100/ws/;
+#     }
+#
+#     location / {
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_pass http://127.0.0.1:3001;
+#     }
+# }

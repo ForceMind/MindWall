@@ -457,7 +457,7 @@ onBeforeUnmount(() => {
 
       <div ref="listRef" class="message-list" style="padding: 0 16px 10px">
         <div v-if="loading" class="bubble system">正在加载会话...</div>
-        <div v-if="pageError" class="bubble system" style="color: #ffd3dc">{{ pageError }}</div>
+        <div v-if="pageError" class="bubble system" style="color: #a13553">{{ pageError }}</div>
 
         <div
           v-for="item in messages"

@@ -121,7 +121,7 @@ onMounted(() => {
         </div>
 
         <div v-if="loading" class="bubble system">正在初始化访谈...</div>
-        <div v-if="pageError" class="bubble system" style="color: #ffd3dc">{{ pageError }}</div>
+        <div v-if="pageError" class="bubble system" style="color: #a13553">{{ pageError }}</div>
       </div>
 
       <footer class="panel-body" style="padding-top: 8px">

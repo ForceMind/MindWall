@@ -64,9 +64,9 @@ onMounted(() => {
           <div
             v-for="(line, idx) in content"
             :key="`${idx}-${line.slice(0, 12)}`"
-            style="padding: 6px 10px; border-bottom: 1px solid #223457; white-space: pre-wrap; word-break: break-all"
+            style="padding: 6px 10px; border-bottom: 1px solid #eef1f6; white-space: pre-wrap; word-break: break-all"
           >
-            <span style="color: #7f92b8; margin-right: 8px">{{ idx + 1 }}</span>
+            <span style="color: #8896aa; margin-right: 8px">{{ idx + 1 }}</span>
             {{ line }}
           </div>
 

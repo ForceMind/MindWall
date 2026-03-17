@@ -63,6 +63,8 @@ WEB_PORT="${WEB_PORT:-3001}"
 PG_PORT="${PG_PORT:-5433}"
 REDIS_PORT="${REDIS_PORT:-6380}"
 PUBLIC_HOST="${PUBLIC_HOST:-}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 SKIP_GIT="${SKIP_GIT:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 SKIP_SYSTEM_INSTALL="${SKIP_SYSTEM_INSTALL:-0}"
@@ -281,6 +283,8 @@ load_saved_ports() {
   [[ -n "$saved" ]] && PG_PORT="$saved"
   saved="$(grep -E '^REDIS_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
   [[ -n "$saved" ]] && REDIS_PORT="$saved"
+  saved="$(grep -E '^PUBLIC_HOST=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
+  [[ -n "$saved" && -z "$PUBLIC_HOST" ]] && PUBLIC_HOST="$saved"
 }
 
 save_runtime_ports() {
@@ -290,6 +294,7 @@ API_PORT=$API_PORT
 WEB_PORT=$WEB_PORT
 PG_PORT=$PG_PORT
 REDIS_PORT=$REDIS_PORT
+PUBLIC_HOST=$PUBLIC_HOST
 EOF
 }
 
@@ -497,6 +502,11 @@ write_api_env() {
   set_env_kv "$API_ENV_FILE" "WEB_ORIGIN" "$web_origin"
   set_env_kv "$API_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$cors"
   set_env_kv "$API_ENV_FILE" "APP_VERSION" "$(project_version)"
+
+  # 管理员凭据
+  [[ -n "$ADMIN_USERNAME" ]] && set_env_kv "$API_ENV_FILE" "ADMIN_USERNAME" "$ADMIN_USERNAME"
+  [[ -n "$ADMIN_PASSWORD" ]] && set_env_kv "$API_ENV_FILE" "ADMIN_PASSWORD" "$ADMIN_PASSWORD"
+  [[ -n "$PUBLIC_HOST" ]] && set_env_kv "$API_ENV_FILE" "PUBLIC_HOST" "$PUBLIC_HOST"
 
   if ! grep -qE '^DATABASE_URL=' "$API_ENV_FILE"; then
     set_env_kv "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@127.0.0.1:${PG_PORT}/mindwall?schema=public"
@@ -739,6 +749,48 @@ health_check() {
 #  7 步部署流程
 # ═══════════════════════════════════════════════════════════════
 
+setup_interactive_config() {
+  [[ "$YES" == "1" ]] && return 0
+
+  # ── 公网域名 ──
+  if [[ -z "$PUBLIC_HOST" ]]; then
+    echo
+    read -r -p "$(echo -e "${CYAN}公网域名（如 example.com，直接回车跳过）：${NC}")" input_host
+    [[ -n "$input_host" ]] && PUBLIC_HOST="$input_host"
+  fi
+
+  # ── 管理员凭据（首次部署或密码为默认值时提示） ──
+  local current_pw=""
+  if [[ -f "$API_ENV_FILE" ]]; then
+    current_pw="$(grep -E '^ADMIN_PASSWORD=' "$API_ENV_FILE" | tail -1 | sed 's/^ADMIN_PASSWORD=//' | sed 's/^"//;s/"$//' || true)"
+  fi
+
+  if [[ -z "$current_pw" || "$current_pw" == "change-this-admin-password" || "$current_pw" == "mindwall-admin" ]]; then
+    echo
+    log_info "首次部署 — 设置管理后台凭据"
+    read -r -p "$(echo -e "${CYAN}管理员用户名（默认 admin）：${NC}")" input_admin_user
+    [[ -n "$input_admin_user" ]] && ADMIN_USERNAME="$input_admin_user" || ADMIN_USERNAME="admin"
+
+    while true; do
+      read -r -s -p "$(echo -e "${CYAN}管理员密码（直接回车自动生成）：${NC}")" input_admin_pw
+      echo
+      if [[ -n "$input_admin_pw" ]]; then
+        if (( ${#input_admin_pw} < 6 )); then
+          log_warn "密码至少 6 位，请重新输入"
+          continue
+        fi
+        ADMIN_PASSWORD="$input_admin_pw"
+      else
+        ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
+        log_info "已自动生成管理员密码: ${BOLD}${ADMIN_PASSWORD}${NC}"
+      fi
+      break
+    done
+  else
+    log_info "管理员密码已配置，跳过设置（如需修改请编辑 $API_ENV_FILE）"
+  fi
+}
+
 step_1_preflight() {
   log_step "[1/7] 环境检测与安全检查"
   require_root
@@ -747,8 +799,10 @@ step_1_preflight() {
   load_saved_ports
   preflight_check_ports
   backup_data
+  setup_interactive_config
   log_info "系统: ${OS_ID:-未知}  包管理器: $PKG_MANAGER"
   log_info "端口分配: API=$API_PORT  Web=$WEB_PORT  PG=$PG_PORT  Redis=$REDIS_PORT"
+  [[ -n "$PUBLIC_HOST" ]] && log_info "公网域名: $PUBLIC_HOST"
 }
 
 step_2_system_deps() {
@@ -917,6 +971,9 @@ print_summary() {
   echo -e "${GREEN}${BOLD}  MindWall v$(project_version) 部署完成${NC}"
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
   echo -e "  模式:      ${GREEN}独立模式${NC}（不影响 Nginx / PM2 / 其他服务）"
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    echo -e "  公网地址:  ${CYAN}https://${PUBLIC_HOST}${NC}"
+  fi
   echo -e "  Web 地址:  ${CYAN}http://${host}:${WEB_PORT}${NC}"
   echo -e "  API 端口:  $API_PORT（仅 127.0.0.1）"
   echo -e "  Web 端口:  $WEB_PORT（0.0.0.0 对外）"
@@ -924,6 +981,18 @@ print_summary() {
   echo -e "  Node 路径: $NODE_RUNTIME_DIR"
   echo -e "  服务:      mindwall-api + mindwall-web"
   echo
+
+  # 管理后台信息
+  local admin_base="http://${host}:${WEB_PORT}"
+  [[ -n "$PUBLIC_HOST" ]] && admin_base="https://${PUBLIC_HOST}"
+  echo -e "  ${YELLOW}管理后台:${NC}  ${CYAN}${admin_base}/admin/login${NC}"
+  local show_user; show_user="$(grep -E '^ADMIN_USERNAME=' "$API_ENV_FILE" 2>/dev/null | tail -1 | sed 's/^ADMIN_USERNAME=//' | sed 's/^"//;s/"$//' || echo 'admin')"
+  echo -e "  ${YELLOW}管理员:${NC}    ${show_user}"
+  if [[ -n "$ADMIN_PASSWORD" ]]; then
+    echo -e "  ${YELLOW}密码:${NC}      ${BOLD}${ADMIN_PASSWORD}${NC}  ← ${RED}请立即记录并妥善保存${NC}"
+  fi
+  echo
+
   echo -e "  管理:  ${CYAN}mw status${NC}     查看运行状态"
   echo -e "         ${CYAN}mw logs${NC}       查看 API 日志"
   echo -e "         ${CYAN}mw update${NC}     快速更新"
@@ -932,7 +1001,7 @@ print_summary() {
   echo -e "         ${CYAN}mw menu${NC}       交互菜单"
   echo
   if [[ -n "$host" ]] && [[ "$host" =~ ^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.) ]]; then
-    log_warn "当前为内网 IP（$host），公网访问请使用 --public-host 指定域名"
+    [[ -z "$PUBLIC_HOST" ]] && log_warn "当前为内网 IP（$host），公网访问请使用 --public-host 指定域名"
   fi
   echo -e "  ${YELLOW}提示:${NC} 如果需要 Nginx 反代，参考: infra/mindwall-nginx.conf.template"
   echo -e "  ${YELLOW}提示:${NC} 公网访问请确保安全组/防火墙放行端口 $WEB_PORT"
