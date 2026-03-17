@@ -4,6 +4,10 @@
 #   ✓ 不修改 Nginx 配置     ✓ 不干涉 PM2
 #   ✓ 不监听 80/443 端口    ✓ 不 kill 非 MindWall 进程
 #   ✓ Docker 使用项目专属名称和端口
+
+# CRLF 自修复（单行，尾部 # 吸收可能的 \r，确保即使文件是 CRLF 也能执行）
+head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
+
 set -euo pipefail
 
 # ─── 颜色 & 日志 ─────────────────────────────────────────────
@@ -901,6 +905,10 @@ step_5_git() {
   fi
 
   git show-ref --verify --quiet "refs/remotes/origin/$BRANCH" && git pull --ff-only origin "$BRANCH"
+
+  # 修复可能的 CRLF 换行符（Windows Git 可能注入 \r）
+  find "$ROOT_DIR" -maxdepth 1 \( -name '*.sh' -o -name 'mw' \) -exec sed -i 's/\r$//' {} +
+
   log_info "代码已更新到分支 $BRANCH"
 }
 

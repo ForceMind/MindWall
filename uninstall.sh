@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # MindWall 卸载脚本 — 安全移除服务，不影响其他项目
 # 学习自 Minimal-Server-Deploy/Server-Version/uninstall.sh
+head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
 set -euo pipefail
 
 GREEN='\033[0;32m'

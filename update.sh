@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # MindWall 更新脚本 — 快速更新（跳过系统依赖安装）
 # 等价于 deploy.sh --skip-system-install，但增加更新前备份提示
+head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
 set -euo pipefail
 
 GREEN='\033[0;32m'
