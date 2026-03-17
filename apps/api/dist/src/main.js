@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
+const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const admin_config_service_1 = require("./admin/admin-config.service");
 const app_module_1 = require("./app.module");
@@ -24,6 +25,51 @@ function normalizeOrigin(value) {
     catch {
         return null;
     }
+}
+function normalizeHost(value) {
+    if (!value || !value.trim()) {
+        return null;
+    }
+    let raw = value.trim();
+    raw = raw.replace(/^https?:\/\//i, '');
+    raw = raw.replace(/^\/\//, '');
+    raw = raw.replace(/\/.*$/, '');
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = new URL(`http://${raw}`);
+        return parsed.hostname.toLowerCase();
+    }
+    catch {
+        return null;
+    }
+}
+function resolveOriginCandidates(value) {
+    if (!value || !value.trim()) {
+        return [];
+    }
+    const raw = value.trim();
+    if (raw === '*') {
+        return ['*'];
+    }
+    const normalized = normalizeOrigin(raw);
+    if (normalized) {
+        return [normalized];
+    }
+    const host = normalizeHost(raw);
+    if (!host) {
+        return [];
+    }
+    let port = '';
+    try {
+        const parsed = new URL(`http://${raw.replace(/^\/\//, '')}`);
+        port = parsed.port ? `:${parsed.port}` : '';
+    }
+    catch {
+        port = '';
+    }
+    return [`https://${host}${port}`, `http://${host}${port}`];
 }
 function parseCsvOrigins(raw) {
     if (!raw) {
@@ -60,6 +106,7 @@ function isLocalDevOrigin(origin) {
 }
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    const logger = new common_1.Logger('Bootstrap');
     app.use(request_context_middleware_1.requestContextMiddleware);
     app.useGlobalFilters(app.get(global_http_exception_filter_1.GlobalHttpExceptionFilter));
     app.useGlobalInterceptors(app.get(http_logging_interceptor_1.HttpLoggingInterceptor));
@@ -77,21 +124,43 @@ async function bootstrap() {
         'http://127.0.0.1:3000',
         'http://127.0.0.1:3001',
     ].filter((item) => Boolean(item && item.trim()));
+    const allowAllOrigins = rawAllowedOrigins.some((item) => item.trim() === '*');
     const allowedOrigins = new Set();
+    const allowedHosts = new Set();
     for (const item of rawAllowedOrigins) {
-        const normalized = normalizeOrigin(item);
-        if (normalized) {
-            allowedOrigins.add(normalized);
+        for (const candidate of resolveOriginCandidates(item)) {
+            if (candidate === '*') {
+                continue;
+            }
+            const normalized = normalizeOrigin(candidate);
+            if (normalized) {
+                allowedOrigins.add(normalized);
+                const host = normalizeHost(normalized);
+                if (host) {
+                    allowedHosts.add(host);
+                }
+            }
+        }
+        const hostOnly = normalizeHost(item);
+        if (hostOnly) {
+            allowedHosts.add(hostOnly);
         }
     }
+    logger.log(`CORS initialized: allowAll=${allowAllOrigins}, origins=${Array.from(allowedOrigins).join(' | ')}`);
     app.enableCors({
         origin: (origin, callback) => {
             if (!origin) {
                 callback(null, true);
                 return;
             }
+            if (allowAllOrigins) {
+                callback(null, true);
+                return;
+            }
             const normalizedOrigin = normalizeOrigin(origin);
+            const originHost = normalizeHost(origin);
             if ((normalizedOrigin && allowedOrigins.has(normalizedOrigin)) ||
+                (originHost && allowedHosts.has(originHost)) ||
                 isLocalDevOrigin(origin)) {
                 callback(null, true);
                 return;
