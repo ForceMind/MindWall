@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# MindWall 閮ㄧ讲鑴氭湰 v2.0 鈥?绾嫭绔嬫ā寮忥紝涓嶆敼鍔?Nginx / PM2 / 鍏朵粬鏈嶅姟
-# 璁捐鍘熷垯锛堝涔犺嚜 Minimal-Server-Deploy锛夛細
-#   鉁?涓嶄慨鏀?Nginx 閰嶇疆     鉁?涓嶅共娑?PM2
-#   鉁?涓嶇洃鍚?80/443 绔彛    鉁?涓?kill 闈?MindWall 杩涚▼
-#   鉁?Docker 浣跨敤椤圭洰涓撳睘鍚嶇О鍜岀鍙?
-# CRLF 鑷慨澶嶏紙鍗曡锛屽熬閮?# 鍚告敹鍙兘鐨?\r锛岀‘淇濆嵆浣挎枃浠舵槸 CRLF 涔熻兘鎵ц锛?head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
+if head -n 1 "$0" | grep -q $'\r'; then
+  sed -i 's/\r$//' "$0"
+  exec bash "$0" "$@"
+fi
 
 set -euo pipefail
 
-# 鈹€鈹€鈹€ 棰滆壊 & 鏃ュ織 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -16,13 +13,12 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-log_info()  { echo -e "${GREEN}[鉁揮${NC} $*"; }
-log_warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-log_error() { echo -e "${RED}[鉁梋${NC} $*"; }
+log_info()  { echo -e "${GREEN}[OK]${NC} $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERR]${NC} $*"; }
 log_step()  { echo -e "\n${CYAN}${BOLD}$*${NC}"; }
 die()       { log_error "$*" >&2; exit 1; }
 
-# 鈹€鈹€鈹€ 璺緞甯搁噺 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 SELF="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then
   SELF="$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")"
@@ -38,127 +34,252 @@ RUNTIME_DIR="$ROOT_DIR/.mw-runtime"
 NODE_RUNTIME_DIR="$RUNTIME_DIR/node"
 NODE_BIN="$NODE_RUNTIME_DIR/bin/node"
 NPM_BIN="$NODE_RUNTIME_DIR/bin/npm"
-NPM_CLI_JS="$NODE_RUNTIME_DIR/lib/node_modules/npm/bin/npm-cli.js"
 RUNTIME_PORTS_FILE="$RUNTIME_DIR/ports.env"
 BACKUP_DIR="$RUNTIME_DIR/backups"
+RUNTIME_WEB_SERVER_FILE="$RUNTIME_DIR/mindwall-web-server.cjs"
 
 API_ENV_FILE="$API_DIR/.env"
-WEB_ENV_PROD_FILE="$WEB_DIR/.env.production.local"
+WEB_ENV_FILE="$WEB_DIR/.env.production.local"
+
 SYSTEMD_API_SERVICE="mindwall-api"
 SYSTEMD_WEB_SERVICE="mindwall-web"
 SYSTEMD_API_FILE="/etc/systemd/system/${SYSTEMD_API_SERVICE}.service"
 SYSTEMD_WEB_FILE="/etc/systemd/system/${SYSTEMD_WEB_SERVICE}.service"
-RUNTIME_WEB_SERVER_FILE="$RUNTIME_DIR/mindwall-web-server.cjs"
 
-MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
-LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-20.19.5}"
+DEFAULT_API_PORT=3100
+DEFAULT_WEB_PORT=3001
+DEFAULT_PG_PORT=5433
+DEFAULT_REDIS_PORT=6380
 
-# 鈹€鈹€鈹€ 榛樿鍙傛暟 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 if [[ -z "$CURRENT_BRANCH" || "$CURRENT_BRANCH" == "HEAD" ]]; then
   CURRENT_BRANCH="main"
 fi
 
 BRANCH="${BRANCH:-$CURRENT_BRANCH}"
-API_PORT="${API_PORT:-3100}"
-WEB_PORT="${WEB_PORT:-3001}"
-PG_PORT="${PG_PORT:-5433}"
-REDIS_PORT="${REDIS_PORT:-6380}"
+API_PORT="${API_PORT:-$DEFAULT_API_PORT}"
+WEB_PORT="${WEB_PORT:-$DEFAULT_WEB_PORT}"
+PG_PORT="${PG_PORT:-$DEFAULT_PG_PORT}"
+REDIS_PORT="${REDIS_PORT:-$DEFAULT_REDIS_PORT}"
 PUBLIC_HOST="${PUBLIC_HOST:-}"
-ADMIN_USERNAME="${ADMIN_USERNAME:-}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 SKIP_GIT="${SKIP_GIT:-0}"
 NO_DOCKER="${NO_DOCKER:-0}"
 SKIP_SYSTEM_INSTALL="${SKIP_SYSTEM_INSTALL:-0}"
 YES="${YES:-0}"
 
+ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
+LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-20.19.5}"
+
 SUDO=""
 PKG_MANAGER=""
-OS_ID=""
 
-# 鈹€鈹€鈹€ 甯姪 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 usage() {
   cat <<'EOF'
-MindWall 閮ㄧ讲鑴氭湰 v2锛堢函鐙珛妯″紡锛屼笉褰卞搷 Nginx / PM2 / 鍏朵粬鏈嶅姟锛?
-鐢ㄦ硶:
-  sudo bash deploy.sh [閫夐」]
+MindWall 部署脚本 v2.1（独立模式，不修改 Nginx/PM2）
 
-閫夐」:
-  --branch <name>           Git 鍒嗘敮锛堥粯璁わ細褰撳墠鍒嗘敮锛?  --api-port <port>         API 绔彛锛堥粯璁?3100锛屼粎鐩戝惉 127.0.0.1锛?  --web-port <port>         Web 绔彛锛堥粯璁?3001锛屽缃戝彲璁块棶锛?  --pg-port <port>          PostgreSQL 鏄犲皠绔彛锛堥粯璁?5433锛?  --redis-port <port>       Redis 鏄犲皠绔彛锛堥粯璁?6380锛?  --public-host <host>      鍏綉鍩熷悕鎴?IP锛堢敤浜?CORS锛?  --skip-git                璺宠繃 Git 鎷夊彇
-  --no-docker               璺宠繃 Docker锛堝閮ㄧ鐞?PG/Redis锛?  --skip-system-install     璺宠繃绯荤粺鍖呭畨瑁咃紙閫傚悎鏇存柊鍦烘櫙锛?  --yes                     闈炰氦浜掓ā寮?  -h, --help                鏄剧ず甯姪
+用法:
+  sudo bash deploy.sh [选项]
 
-瀹夊叏淇濊瘉:
-  * 涓嶄慨鏀?Nginx 閰嶇疆     * 涓嶅共娑?PM2
-  * 涓嶇洃鍚?80/443 绔彛    * 涓?kill 闈?MindWall 杩涚▼
-  * Docker 浣跨敤椤圭洰涓撳睘鍚嶇О鍜岀鍙?  * 濡傞渶 Nginx 鍙嶄唬锛岃鍙傝€? infra/mindwall-nginx.conf.template
+选项:
+  --branch <name>           Git 分支（默认当前分支）
+  --api-port <port>         API 端口（默认 3100，仅监听 127.0.0.1）
+  --web-port <port>         Web 端口（默认 3001，对外监听）
+  --pg-port <port>          PostgreSQL 端口（默认 5433）
+  --redis-port <port>       Redis 端口（默认 6380）
+  --public-host <host>      公网域名或 IP（用于 CORS 和展示）
+  --skip-git                跳过 Git 拉取
+  --no-docker               跳过 Docker（外部自备 PG/Redis）
+  --skip-system-install     跳过系统依赖安装（更新模式常用）
+  --yes                     非交互模式
+  -h, --help                显示帮助
+
+安全策略:
+  1) 不修改全局 Nginx 配置
+  2) 不接管/修改 PM2
+  3) 不占用 80/443
+  4) 不杀死非 MindWall 进程
 EOF
 }
 
-# 鈹€鈹€鈹€ 鍙傛暟瑙ｆ瀽 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --branch)        [[ $# -ge 2 ]] || die "--branch 缂哄皯鍙傛暟"; BRANCH="$2"; shift 2 ;;
-    --api-port)      [[ $# -ge 2 ]] || die "--api-port 缂哄皯鍙傛暟"; API_PORT="$2"; shift 2 ;;
-    --web-port)      [[ $# -ge 2 ]] || die "--web-port 缂哄皯鍙傛暟"; WEB_PORT="$2"; shift 2 ;;
-    --pg-port)       [[ $# -ge 2 ]] || die "--pg-port 缂哄皯鍙傛暟"; PG_PORT="$2"; shift 2 ;;
-    --redis-port)    [[ $# -ge 2 ]] || die "--redis-port 缂哄皯鍙傛暟"; REDIS_PORT="$2"; shift 2 ;;
-    --public-host)   [[ $# -ge 2 ]] || die "--public-host 缂哄皯鍙傛暟"; PUBLIC_HOST="$2"; shift 2 ;;
-    --skip-git)      SKIP_GIT="1"; shift ;;
-    --no-docker)     NO_DOCKER="1"; shift ;;
+    --branch) [[ $# -ge 2 ]] || die "--branch 缺少参数"; BRANCH="$2"; shift 2 ;;
+    --api-port) [[ $# -ge 2 ]] || die "--api-port 缺少参数"; API_PORT="$2"; shift 2 ;;
+    --web-port) [[ $# -ge 2 ]] || die "--web-port 缺少参数"; WEB_PORT="$2"; shift 2 ;;
+    --pg-port) [[ $# -ge 2 ]] || die "--pg-port 缺少参数"; PG_PORT="$2"; shift 2 ;;
+    --redis-port) [[ $# -ge 2 ]] || die "--redis-port 缺少参数"; REDIS_PORT="$2"; shift 2 ;;
+    --public-host) [[ $# -ge 2 ]] || die "--public-host 缺少参数"; PUBLIC_HOST="$2"; shift 2 ;;
+    --skip-git) SKIP_GIT="1"; shift ;;
+    --no-docker) NO_DOCKER="1"; shift ;;
     --skip-system-install) SKIP_SYSTEM_INSTALL="1"; shift ;;
-    --yes)           YES="1"; shift ;;
-    -h|--help|help)  usage; exit 0 ;;
-    *) die "鏈瘑鍒弬鏁? $1锛堜娇鐢?--help 鏌ョ湅甯姪锛? ;;
+    --yes) YES="1"; shift ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) die "未知参数: $1（使用 --help 查看）" ;;
   esac
 done
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  閫氱敤宸ュ叿鍑芥暟
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?have_command() { command -v "$1" >/dev/null 2>&1; }
+have_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
 
 as_root() {
-  if [[ -n "$SUDO" ]]; then "$SUDO" "$@"; else "$@"; fi
+  if [[ -n "$SUDO" ]]; then
+    "$SUDO" "$@"
+  else
+    "$@"
+  fi
 }
 
 confirm_yes() {
   local prompt="$1"
-  [[ "$YES" == "1" ]] && return 1
+  if [[ "$YES" == "1" ]]; then
+    return 0
+  fi
   read -r -p "$prompt" ans
   [[ "$ans" =~ ^[Yy]$ ]]
 }
 
 project_version() {
-  [[ -f "$VERSION_FILE" ]] && tr -d '[:space:]' < "$VERSION_FILE" || echo "鏈煡"
+  if [[ -f "$VERSION_FILE" ]]; then
+    tr -d '[:space:]' < "$VERSION_FILE"
+  else
+    echo "unknown"
+  fi
+}
+
+read_kv() {
+  local file="$1"
+  local key="$2"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+  grep -E "^${key}=" "$file" | tail -1 | cut -d= -f2- || true
+}
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  local default_value="${3:-}"
+  if [[ -f "$file" ]]; then
+    local raw
+    raw="$(grep -E "^${key}=" "$file" | tail -1 | cut -d= -f2- || true)"
+    if [[ -n "$raw" ]]; then
+      raw="${raw%\"}"
+      raw="${raw#\"}"
+      echo "$raw"
+      return 0
+    fi
+  fi
+  echo "$default_value"
+}
+
+append_csv_item() {
+  local csv="$1"
+  local item="$2"
+  if [[ -z "$item" ]]; then
+    echo "$csv"
+    return 0
+  fi
+  if [[ -z "$csv" ]]; then
+    echo "$item"
+    return 0
+  fi
+  case ",$csv," in
+    *",$item,"*) echo "$csv" ;;
+    *) echo "$csv,$item" ;;
+  esac
+}
+
+normalize_public_host() {
+  local host="$1"
+  host="${host#http://}"
+  host="${host#https://}"
+  host="${host%%/*}"
+  echo "$host"
+}
+
+require_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    SUDO=""
+    return
+  fi
+  if have_cmd sudo; then
+    SUDO="sudo"
+    return
+  fi
+  die "请使用 root 或 sudo 执行。"
+}
+
+detect_pkg_manager() {
+  if have_cmd apt-get; then
+    PKG_MANAGER="apt"
+  elif have_cmd dnf; then
+    PKG_MANAGER="dnf"
+  elif have_cmd yum; then
+    PKG_MANAGER="yum"
+  elif have_cmd zypper; then
+    PKG_MANAGER="zypper"
+  elif have_cmd pacman; then
+    PKG_MANAGER="pacman"
+  else
+    PKG_MANAGER="unknown"
+  fi
+}
+
+pkg_update_cache() {
+  case "$PKG_MANAGER" in
+    apt) as_root apt-get update -y ;;
+    dnf) as_root dnf makecache -y || true ;;
+    yum) as_root yum makecache -y || true ;;
+    zypper) as_root zypper --gpg-auto-import-keys refresh || true ;;
+    pacman) as_root pacman -Sy --noconfirm || true ;;
+    *) ;;
+  esac
+}
+
+pkg_install() {
+  case "$PKG_MANAGER" in
+    apt) as_root apt-get install -y "$@" ;;
+    dnf) as_root dnf install -y "$@" ;;
+    yum) as_root yum install -y "$@" ;;
+    zypper) as_root zypper --non-interactive install "$@" ;;
+    pacman) as_root pacman -S --noconfirm --needed "$@" ;;
+    *) die "未识别包管理器，请手动安装: $*" ;;
+  esac
 }
 
 validate_port() {
-  local value="$1"
-  [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1024 && value <= 65535 ))
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] && (( p >= 1024 && p <= 65535 ))
 }
 
 port_in_use() {
-  local port="$1"
-  if have_command ss; then
-    ss -lnt "( sport = :$port )" 2>/dev/null | grep -q ":$port"
+  local p="$1"
+  if have_cmd ss; then
+    ss -lnt "( sport = :$p )" 2>/dev/null | grep -q ":$p"
     return $?
   fi
-  if have_command lsof; then
-    lsof -iTCP:"$port" -sTCP:LISTEN -Pn >/dev/null 2>&1
+  if have_cmd lsof; then
+    lsof -iTCP:"$p" -sTCP:LISTEN -Pn >/dev/null 2>&1
     return $?
   fi
   return 1
 }
 
 port_owner_summary() {
-  local port="$1"
-  if have_command ss; then
-    local s; s="$(ss -lntp "( sport = :$port )" 2>/dev/null | tail -n +2 | head -3)"
-    [[ -n "$s" ]] && { echo "$s"; return; }
+  local p="$1"
+  if have_cmd ss; then
+    ss -lntp "( sport = :$p )" 2>/dev/null | tail -n +2 | head -3
+    return 0
   fi
-  if have_command lsof; then
-    local s; s="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -3 | awk '{printf "%s(pid=%s) ",$1,$2}')"
-    [[ -n "$s" ]] && { echo "$s"; return; }
+  if have_cmd lsof; then
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -3
+    return 0
   fi
-  echo "鏈煡杩涚▼"
+  echo "无法识别占用进程"
 }
 
 version_ge() {
@@ -169,103 +290,66 @@ node_version_of() {
   "$1" -v 2>/dev/null | sed -E 's/^v([0-9]+(\.[0-9]+){0,2}).*/\1/'
 }
 
-is_our_service_on_port() {
-  local port="$1" service_name="$2"
-  have_command systemctl || return 1
-  as_root systemctl is-active --quiet "$service_name" 2>/dev/null && port_in_use "$port"
-}
-
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  绯荤粺妫€娴?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?require_root() {
-  if [[ "$(id -u)" -eq 0 ]]; then SUDO=""; return; fi
-  if have_command sudo; then SUDO="sudo"; return; fi
-  die "璇蜂娇鐢?root 鎵ц锛屾垨鍏堝畨瑁?sudo銆?
-}
-
-detect_os() {
-  if [[ -f /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    source /etc/os-release
-    OS_ID="$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')"
-  fi
-}
-
-detect_pkg_manager() {
-  if have_command apt-get; then PKG_MANAGER="apt"
-  elif have_command dnf; then PKG_MANAGER="dnf"
-  elif have_command yum; then PKG_MANAGER="yum"
-  elif have_command zypper; then PKG_MANAGER="zypper"
-  elif have_command pacman; then PKG_MANAGER="pacman"
-  else PKG_MANAGER="unknown"; fi
-}
-
-pkg_update_cache() {
-  case "$PKG_MANAGER" in
-    apt)    as_root apt-get update -y ;;
-    dnf)    as_root dnf makecache -y || true ;;
-    yum)    as_root yum makecache -y || true ;;
-    zypper) as_root zypper --gpg-auto-import-keys refresh ;;
-    pacman) as_root pacman -Sy --noconfirm ;;
-    *) ;;
-  esac
-}
-
-pkg_install() {
-  case "$PKG_MANAGER" in
-    apt)    as_root apt-get install -y "$@" ;;
-    dnf)    as_root dnf install -y "$@" ;;
-    yum)    as_root yum install -y "$@" ;;
-    zypper) as_root zypper --non-interactive install "$@" ;;
-    pacman) as_root pacman -S --noconfirm --needed "$@" ;;
-    *) die "涓嶆敮鎸佺殑鍖呯鐞嗗櫒锛岃鎵嬪姩瀹夎锛?*" ;;
-  esac
-}
-
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  绔彛瀹夊叏妫€鏌?鈥?鏍稿績瀹夊叏璁捐锛氱粷涓嶈嚜鍔ㄦ潃姝婚潪 MindWall 杩涚▼
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?preflight_check_ports() {
-  log_info "妫€鏌ョ鍙ｅ彲鐢ㄦ€?.."
-
-  validate_port "$API_PORT" || die "API 绔彛涓嶅悎娉? $API_PORT锛堥渶 1024-65535锛?
-  validate_port "$WEB_PORT" || die "Web 绔彛涓嶅悎娉? $WEB_PORT锛堥渶 1024-65535锛?
-  [[ "$API_PORT" != "$WEB_PORT" ]] || die "API 绔彛鍜?Web 绔彛涓嶈兘鐩稿悓: $API_PORT"
-
-  # 妫€鏌?API 绔彛
-  if port_in_use "$API_PORT"; then
-    if is_our_service_on_port "$API_PORT" "$SYSTEMD_API_SERVICE"; then
-      log_info "API 绔彛 $API_PORT 琚?MindWall 鏈嶅姟鍗犵敤锛岄儴缃叉椂鑷姩閲嶅惎"
-    else
-      echo
-      log_error "API 绔彛 $API_PORT 宸茶鍏朵粬鏈嶅姟鍗犵敤:"
-      port_owner_summary "$API_PORT"
-      die "璇蜂娇鐢?--api-port <绔彛> 鎸囧畾鍏朵粬绔彛"
+retry_cmd() {
+  local max_retries="$1"
+  shift
+  local i=1
+  while true; do
+    if "$@"; then
+      return 0
     fi
-  fi
-
-  # 妫€鏌?Web 绔彛
-  if port_in_use "$WEB_PORT"; then
-    if is_our_service_on_port "$WEB_PORT" "$SYSTEMD_WEB_SERVICE"; then
-      log_info "Web 绔彛 $WEB_PORT 琚?MindWall 鏈嶅姟鍗犵敤锛岄儴缃叉椂鑷姩閲嶅惎"
-    else
-      echo
-      log_error "Web 绔彛 $WEB_PORT 宸茶鍏朵粬鏈嶅姟鍗犵敤:"
-      port_owner_summary "$WEB_PORT"
-      die "璇蜂娇鐢?--web-port <绔彛> 鎸囧畾鍏朵粬绔彛"
+    if (( i >= max_retries )); then
+      return 1
     fi
+    sleep $((i * 2))
+    i=$((i + 1))
+  done
+}
+
+resolve_host_for_display() {
+  if [[ -n "$PUBLIC_HOST" ]]; then
+    echo "$(normalize_public_host "$PUBLIC_HOST")"
+    return
+  fi
+  local ip
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$ip" ]]; then
+    echo "$ip"
+  else
+    echo "127.0.0.1"
   fi
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  閰嶇疆鎸佷箙鍖?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?load_saved_ports() {
-  [[ -f "$RUNTIME_PORTS_FILE" ]] || return 0
-  local saved
-  saved="$(grep -E '^API_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
-  [[ -n "$saved" && "$API_PORT" == "3100" ]] && API_PORT="$saved"
-  saved="$(grep -E '^WEB_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
-  [[ -n "$saved" && "$WEB_PORT" == "3001" ]] && WEB_PORT="$saved"
-  saved="$(grep -E '^PG_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
-  [[ -n "$saved" ]] && PG_PORT="$saved"
-  saved="$(grep -E '^REDIS_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
-  [[ -n "$saved" ]] && REDIS_PORT="$saved"
-  saved="$(grep -E '^PUBLIC_HOST=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
-  [[ -n "$saved" && -z "$PUBLIC_HOST" ]] && PUBLIC_HOST="$saved"
+load_saved_ports() {
+  if [[ ! -f "$RUNTIME_PORTS_FILE" ]]; then
+    return 0
+  fi
+
+  local val
+  val="$(read_kv "$RUNTIME_PORTS_FILE" API_PORT || true)"
+  if [[ -n "$val" && "$API_PORT" == "$DEFAULT_API_PORT" ]]; then
+    API_PORT="$val"
+  fi
+
+  val="$(read_kv "$RUNTIME_PORTS_FILE" WEB_PORT || true)"
+  if [[ -n "$val" && "$WEB_PORT" == "$DEFAULT_WEB_PORT" ]]; then
+    WEB_PORT="$val"
+  fi
+
+  val="$(read_kv "$RUNTIME_PORTS_FILE" PG_PORT || true)"
+  if [[ -n "$val" && "$PG_PORT" == "$DEFAULT_PG_PORT" ]]; then
+    PG_PORT="$val"
+  fi
+
+  val="$(read_kv "$RUNTIME_PORTS_FILE" REDIS_PORT || true)"
+  if [[ -n "$val" && "$REDIS_PORT" == "$DEFAULT_REDIS_PORT" ]]; then
+    REDIS_PORT="$val"
+  fi
+
+  val="$(read_kv "$RUNTIME_PORTS_FILE" PUBLIC_HOST || true)"
+  if [[ -n "$val" && -z "$PUBLIC_HOST" ]]; then
+    PUBLIC_HOST="$val"
+  fi
 }
 
 save_runtime_ports() {
@@ -279,109 +363,181 @@ PUBLIC_HOST=$PUBLIC_HOST
 EOF
 }
 
-backup_data() {
-  local ts; ts="$(date +%Y%m%d-%H%M%S)"
-  local bak="$BACKUP_DIR/$ts"
-  mkdir -p "$bak"
+backup_runtime_files() {
+  mkdir -p "$BACKUP_DIR"
+  local ts
+  ts="$(date +%Y%m%d-%H%M%S)"
+  local target="$BACKUP_DIR/$ts"
+  mkdir -p "$target"
 
-  [[ -f "$API_ENV_FILE" ]] && cp "$API_ENV_FILE" "$bak/api.env"
-  [[ -f "$WEB_ENV_PROD_FILE" ]] && cp "$WEB_ENV_PROD_FILE" "$bak/web.env.production.local"
-  [[ -f "$RUNTIME_PORTS_FILE" ]] && cp "$RUNTIME_PORTS_FILE" "$bak/ports.env"
+  [[ -f "$API_ENV_FILE" ]] && cp "$API_ENV_FILE" "$target/api.env"
+  [[ -f "$WEB_ENV_FILE" ]] && cp "$WEB_ENV_FILE" "$target/web.env.production.local"
+  [[ -f "$RUNTIME_PORTS_FILE" ]] && cp "$RUNTIME_PORTS_FILE" "$target/ports.env"
 
-  log_info "宸插浠介厤缃埌 $bak"
+  log_info "已备份现有配置到: $target"
 
-  # 淇濈暀鏈€杩?10 涓浠?  local count
-  count="$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-  if (( count > 10 )); then
+  local count
+  count="$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d '[:space:]')"
+  if [[ -n "$count" ]] && (( count > 10 )); then
     find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d | sort | head -n $((count - 10)) | xargs rm -rf
   fi
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  Docker
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?docker_engine_ready() {
-  have_command docker && as_root docker info >/dev/null 2>&1
+validate_project_tree() {
+  [[ -d "$API_DIR" ]] || die "缺少目录: $API_DIR"
+  [[ -d "$WEB_DIR" ]] || die "缺少目录: $WEB_DIR"
+  [[ -f "$API_DIR/package.json" ]] || die "缺少文件: $API_DIR/package.json"
+  [[ -f "$WEB_DIR/package.json" ]] || die "缺少文件: $WEB_DIR/package.json"
 }
 
-docker_compose_cmd() {
-  local env_file="$ROOT_DIR/infra/.env"
-  local compose_args=(-f "$COMPOSE_FILE")
-  [[ -f "$env_file" ]] && compose_args+=(--env-file "$env_file")
-
-  if as_root docker compose version >/dev/null 2>&1; then
-    as_root docker compose "${compose_args[@]}" "$@"
-  elif have_command docker-compose; then
-    as_root docker-compose "${compose_args[@]}" "$@"
-  else
-    die "Docker Compose 涓嶅彲鐢?
-  fi
-}
-
-install_docker_if_needed() {
-  if docker_engine_ready; then return 0; fi
+install_system_packages() {
   if [[ "$SKIP_SYSTEM_INSTALL" == "1" ]]; then
-    die "Docker 涓嶅彲鐢ㄣ€傝鍏堣繍琛屼笉甯?--skip-system-install 鐨勯儴缃层€?
+    log_info "跳过系统依赖安装（--skip-system-install）"
+    return 0
   fi
 
-  log_info "瀹夎 Docker..."
+  log_step "[1/7] 安装基础工具"
+  pkg_update_cache
   case "$PKG_MANAGER" in
     apt)
-      pkg_install docker.io docker-compose-plugin 2>/dev/null || true
-      if ! have_command docker; then pkg_install docker.io 2>/dev/null || true; fi
+      pkg_install ca-certificates curl git tar xz-utils lsof jq
       ;;
-    dnf)
-      as_root dnf install -y dnf-plugins-core || true
-      as_root dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || true
-      pkg_install docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null \
-        || pkg_install docker docker-compose-plugin 2>/dev/null || true
+    dnf|yum)
+      pkg_install ca-certificates curl git tar xz lsof jq
       ;;
-    yum)
-      as_root yum install -y yum-utils || true
-      have_command yum-config-manager && as_root yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || true
-      pkg_install docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null \
-        || pkg_install docker docker-compose-plugin 2>/dev/null || true
+    zypper|pacman)
+      pkg_install ca-certificates curl git tar xz lsof jq
       ;;
-    *) pkg_install docker docker-compose 2>/dev/null || true ;;
+    *)
+      die "无法自动安装依赖，请手动安装 curl/git/tar/xz/lsof/jq"
+      ;;
   esac
-
-  if have_command systemctl; then
-    as_root systemctl daemon-reload || true
-    as_root systemctl enable docker || true
-    as_root systemctl start docker || true
-  fi
-  docker_engine_ready || die "Docker 瀹夎澶辫触锛岃鎵嬪姩瀹夎: https://docs.docker.com/engine/install/"
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  Node.js 杩愯鏃讹紙椤圭洰绉佹湁锛屼笉褰卞搷绯荤粺 Node锛?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?download_with_fallback() {
-  local output="$1"; shift
+ensure_docker_engine() {
+  if [[ "$NO_DOCKER" == "1" ]]; then
+    log_info "跳过 Docker（--no-docker）"
+    return 0
+  fi
+
+  log_step "[2/7] 准备 Docker（PostgreSQL + Redis）"
+
+  if have_cmd docker && as_root docker info >/dev/null 2>&1; then
+    log_info "Docker 已可用"
+  else
+    if [[ "$SKIP_SYSTEM_INSTALL" == "1" ]]; then
+      die "Docker 不可用，请去掉 --skip-system-install 或手动安装 Docker"
+    fi
+
+    case "$PKG_MANAGER" in
+      apt)
+        pkg_install docker.io docker-compose-plugin || pkg_install docker.io
+        ;;
+      dnf)
+        as_root dnf install -y dnf-plugins-core || true
+        as_root dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+        pkg_install docker-ce docker-ce-cli containerd.io docker-compose-plugin || pkg_install docker docker-compose-plugin
+        ;;
+      yum)
+        as_root yum install -y yum-utils || true
+        if have_cmd yum-config-manager; then
+          as_root yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo || true
+        fi
+        pkg_install docker-ce docker-ce-cli containerd.io docker-compose-plugin || pkg_install docker docker-compose-plugin
+        ;;
+      *)
+        die "当前系统无法自动安装 Docker，请手动安装后重试"
+        ;;
+    esac
+
+    if have_cmd systemctl; then
+      as_root systemctl daemon-reload || true
+      as_root systemctl enable docker || true
+      as_root systemctl restart docker || true
+    fi
+  fi
+
+  as_root docker info >/dev/null 2>&1 || die "Docker 引擎不可用，请检查 docker 服务状态"
+}
+
+docker_compose() {
+  local env_file="$ROOT_DIR/infra/.env"
+  local args=(-f "$COMPOSE_FILE")
+  [[ -f "$env_file" ]] && args+=(--env-file "$env_file")
+
+  if as_root docker compose version >/dev/null 2>&1; then
+    as_root docker compose "${args[@]}" "$@"
+  elif have_cmd docker-compose; then
+    as_root docker-compose "${args[@]}" "$@"
+  else
+    die "未找到 docker compose"
+  fi
+}
+
+start_infra() {
+  if [[ "$NO_DOCKER" == "1" ]]; then
+    return 0
+  fi
+
+  [[ -f "$COMPOSE_FILE" ]] || die "缺少文件: $COMPOSE_FILE"
+
+  cat > "$ROOT_DIR/infra/.env" <<EOF
+MW_PG_PORT=$PG_PORT
+MW_REDIS_PORT=$REDIS_PORT
+MW_PG_PASSWORD=mindwall
+EOF
+
+  docker_compose up -d postgres redis
+
+  log_info "等待 PostgreSQL 就绪..."
+  local retries=60
+  while (( retries > 0 )); do
+    if as_root docker exec mindwall-postgres pg_isready -U mindwall -d mindwall >/dev/null 2>&1; then
+      log_info "PostgreSQL/Redis 已就绪"
+      return 0
+    fi
+    sleep 2
+    retries=$((retries - 1))
+  done
+
+  as_root docker logs --tail 30 mindwall-postgres 2>/dev/null || true
+  die "PostgreSQL 启动超时"
+}
+
+download_with_fallback() {
+  local out="$1"
+  shift
+  local url
   for url in "$@"; do
-    if curl -fL --connect-timeout 10 --retry 2 --retry-delay 2 "$url" -o "$output"; then
+    if curl -fL --connect-timeout 10 --retry 2 --retry-delay 2 "$url" -o "$out"; then
       return 0
     fi
   done
   return 1
 }
 
-install_local_node() {
-  local arch node_arch
+install_local_node_runtime() {
+  local arch
+  local node_arch
   arch="$(uname -m)"
   case "$arch" in
     x86_64|amd64) node_arch="x64" ;;
     aarch64|arm64) node_arch="arm64" ;;
-    *) die "涓嶆敮鎸佺殑 CPU 鏋舵瀯: $arch" ;;
+    *) die "不支持的 CPU 架构: $arch" ;;
   esac
 
+  local tmp
+  tmp="$(mktemp -d)"
   local tarball="node-v${LOCAL_NODE_VERSION}-linux-${node_arch}.tar.xz"
-  local tmp; tmp="$(mktemp -d)"
 
-  log_info "涓嬭浇 Node.js v$LOCAL_NODE_VERSION ($node_arch)..."
+  log_info "下载 Node.js v${LOCAL_NODE_VERSION}..."
   if ! download_with_fallback "$tmp/$tarball" \
     "https://nodejs.org/dist/v${LOCAL_NODE_VERSION}/${tarball}" \
     "https://npmmirror.com/mirrors/node/v${LOCAL_NODE_VERSION}/${tarball}"; then
     rm -rf "$tmp"
-    die "涓嬭浇 Node.js 澶辫触锛岃妫€鏌ョ綉缁滆繛鎺ャ€?
+    die "Node.js 下载失败，请检查网络"
   fi
 
-  log_info "瑙ｅ帇 Node.js..."
   tar -xJf "$tmp/$tarball" -C "$tmp"
   rm -rf "$NODE_RUNTIME_DIR"
   mkdir -p "$RUNTIME_DIR"
@@ -391,119 +547,272 @@ install_local_node() {
 }
 
 ensure_node_runtime() {
+  log_step "[3/7] 准备本地 Node.js 运行时"
+
   local current=""
   if [[ -x "$NODE_BIN" ]]; then
     current="$(node_version_of "$NODE_BIN" || true)"
   fi
 
   if [[ -n "$current" ]] && version_ge "$current" "$MIN_NODE_VERSION"; then
-    log_info "Node.js 宸插氨缁? v$current"
+    log_info "Node.js 已就绪: v$current"
   else
-    install_local_node
-    local installed; installed="$(node_version_of "$NODE_BIN" || true)"
-    [[ -n "$installed" ]] && version_ge "$installed" "$MIN_NODE_VERSION" \
-      || die "Node.js 瀹夎澶辫触锛堥渶瑕?>= $MIN_NODE_VERSION锛?
-    log_info "Node.js 宸插畨瑁? v$installed"
+    install_local_node_runtime
+    local installed
+    installed="$(node_version_of "$NODE_BIN" || true)"
+    [[ -n "$installed" ]] || die "Node.js 安装失败"
+    version_ge "$installed" "$MIN_NODE_VERSION" || die "Node.js 版本过低: v$installed"
+    log_info "Node.js 已安装: v$installed"
   fi
-  export PATH="$NODE_RUNTIME_DIR/bin:$PATH"
 }
 
-npm_cmd() {
-  if [[ -x "$NODE_BIN" && -f "$NPM_CLI_JS" ]]; then
-    "$NODE_BIN" "$NPM_CLI_JS" "$@"
-  elif [[ -x "$NPM_BIN" ]]; then
-    "$NPM_BIN" "$@"
-  else
-    die "npm 涓嶅彲鐢紝璇峰厛瀹夎 Node.js 杩愯鏃躲€?
-  fi
+npm_exec() {
+  PATH="$NODE_RUNTIME_DIR/bin:$PATH" "$NPM_BIN" "$@"
 }
 
 npm_install_dir() {
   local dir="$1"
-  cd "$dir"
+
   if [[ -f "$dir/package-lock.json" ]]; then
-    npm_cmd ci --no-fund --no-audit || npm_cmd install --no-fund --no-audit
+    if ! (cd "$dir" && retry_cmd 2 npm_exec ci --no-audit --no-fund); then
+      log_warn "$dir: npm ci 失败，改用 npm install"
+      rm -rf "$dir/node_modules"
+      (cd "$dir" && npm_exec install --no-audit --no-fund)
+    fi
   else
-    npm_cmd install --no-fund --no-audit
+    (cd "$dir" && npm_exec install --no-audit --no-fund)
   fi
 }
 
-ensure_rollup_compat() {
-  local arch libc="gnu" pkg=""
+ensure_rollup_native() {
+  local arch
   arch="$(uname -m)"
-  have_command ldd && ldd --version 2>&1 | grep -qi musl && libc="musl"
+  local pkg=""
   case "$arch" in
-    x86_64|amd64)  pkg="@rollup/rollup-linux-x64-${libc}" ;;
-    aarch64|arm64) pkg="@rollup/rollup-linux-arm64-${libc}" ;;
+    x86_64|amd64) pkg="@rollup/rollup-linux-x64-gnu" ;;
+    aarch64|arm64) pkg="@rollup/rollup-linux-arm64-gnu" ;;
+    *) return 0 ;;
   esac
-  [[ -z "$pkg" ]] && return 0
-  cd "$WEB_DIR"
-  "$NODE_BIN" -e "require('${pkg}')" >/dev/null 2>&1 && return 0
-  log_warn "瀹夎 Rollup 骞冲彴渚濊禆: $pkg"
-  npm_cmd install --no-save --no-fund --no-audit "$pkg" || true
+
+  (cd "$WEB_DIR" && npm_exec install --no-save --no-audit --no-fund "$pkg") || true
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  鐜鍙橀噺
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?resolve_host() {
-  if [[ -n "$PUBLIC_HOST" ]]; then echo "$PUBLIC_HOST"; return; fi
-  local h; h="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-  [[ -n "$h" ]] && echo "$h" || echo "127.0.0.1"
-}
-
-set_env_kv() {
-  local file="$1" key="$2" value="$3"
-  local escaped; escaped="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g' -e 's/"/\\"/g')"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s/^${key}=.*/${key}=\"${escaped}\"/" "$file"
-  else
-    printf '%s="%s"\n' "$key" "$value" >> "$file"
-  fi
+random_alnum() {
+  local len="$1"
+  tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$len"
 }
 
 write_api_env() {
-  mkdir -p "$API_DIR"
-  if [[ ! -f "$API_ENV_FILE" ]]; then
-    [[ -f "$API_DIR/.env.example" ]] && cp "$API_DIR/.env.example" "$API_ENV_FILE" || touch "$API_ENV_FILE"
+  log_step "[4/7] 写入 API/Web 环境配置"
+
+  local db_url
+  db_url="postgresql://mindwall:mindwall@127.0.0.1:${PG_PORT}/mindwall?schema=public"
+
+  local existing_admin_user
+  local existing_admin_pass
+  local existing_admin_token
+  local existing_api_base
+  local existing_api_key
+  local existing_embed_key
+  local existing_model
+  local existing_embed_model
+  local existing_cors
+
+  existing_admin_user="$(read_env_value "$API_ENV_FILE" "ADMIN_USERNAME" "admin")"
+  existing_admin_pass="$(read_env_value "$API_ENV_FILE" "ADMIN_PASSWORD" "")"
+  existing_admin_token="$(read_env_value "$API_ENV_FILE" "ADMIN_TOKEN" "")"
+  existing_api_base="$(read_env_value "$API_ENV_FILE" "OPENAI_BASE_URL" "https://api.openai.com/v1")"
+  existing_api_key="$(read_env_value "$API_ENV_FILE" "OPENAI_API_KEY" "")"
+  existing_embed_key="$(read_env_value "$API_ENV_FILE" "OPENAI_EMBEDDING_API_KEY" "")"
+  existing_model="$(read_env_value "$API_ENV_FILE" "OPENAI_MODEL" "gpt-4.1-mini")"
+  existing_embed_model="$(read_env_value "$API_ENV_FILE" "OPENAI_EMBEDDING_MODEL" "text-embedding-3-small")"
+  existing_cors="$(read_env_value "$API_ENV_FILE" "CORS_ALLOWED_ORIGINS" "")"
+
+  if [[ -z "$ADMIN_USERNAME" ]]; then
+    ADMIN_USERNAME="$existing_admin_user"
+  fi
+  [[ -n "$ADMIN_USERNAME" ]] || ADMIN_USERNAME="admin"
+
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    ADMIN_PASSWORD="$existing_admin_pass"
+  fi
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    ADMIN_PASSWORD="mw$(random_alnum 12)"
+    log_warn "未检测到管理员密码，已生成随机密码: ${BOLD}${ADMIN_PASSWORD}${NC}"
   fi
 
-  local host; host="$(resolve_host)"
-  local web_origin="http://${host}:${WEB_PORT}"
-  local cors="$web_origin"
-  [[ -n "$PUBLIC_HOST" ]] && cors="https://$PUBLIC_HOST,http://$PUBLIC_HOST,$web_origin"
+  local admin_token
+  admin_token="$existing_admin_token"
+  if [[ -z "$admin_token" ]]; then
+    admin_token="tok_$(random_alnum 32)"
+  fi
 
-  set_env_kv "$API_ENV_FILE" "PORT" "$API_PORT"
-  set_env_kv "$API_ENV_FILE" "WEB_ORIGIN" "$web_origin"
-  set_env_kv "$API_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$cors"
-  set_env_kv "$API_ENV_FILE" "APP_VERSION" "$(project_version)"
+  local norm_host
+  norm_host="$(normalize_public_host "$PUBLIC_HOST")"
 
-  # 绠＄悊鍛樺嚟鎹?  [[ -n "$ADMIN_USERNAME" ]] && set_env_kv "$API_ENV_FILE" "ADMIN_USERNAME" "$ADMIN_USERNAME"
-  [[ -n "$ADMIN_PASSWORD" ]] && set_env_kv "$API_ENV_FILE" "ADMIN_PASSWORD" "$ADMIN_PASSWORD"
-  [[ -n "$PUBLIC_HOST" ]] && set_env_kv "$API_ENV_FILE" "PUBLIC_HOST" "$PUBLIC_HOST"
-
-  if ! grep -qE '^DATABASE_URL=' "$API_ENV_FILE"; then
-    set_env_kv "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@127.0.0.1:${PG_PORT}/mindwall?schema=public"
+  local web_origin
+  if [[ -n "$norm_host" ]]; then
+    web_origin="https://${norm_host}"
   else
-    sed -i "s/@localhost:5432/@127.0.0.1:${PG_PORT}/g" "$API_ENV_FILE" || true
-    sed -i "s/@localhost:5433/@127.0.0.1:${PG_PORT}/g" "$API_ENV_FILE" || true
-    sed -i "s/@127\.0\.0\.1:5432/@127.0.0.1:${PG_PORT}/g" "$API_ENV_FILE" || true
+    web_origin="http://127.0.0.1:${WEB_PORT}"
+  fi
+
+  local cors_csv
+  cors_csv="$existing_cors"
+  cors_csv="$(append_csv_item "$cors_csv" "http://127.0.0.1:${WEB_PORT}")"
+  cors_csv="$(append_csv_item "$cors_csv" "http://localhost:${WEB_PORT}")"
+  if [[ -n "$norm_host" ]]; then
+    cors_csv="$(append_csv_item "$cors_csv" "https://${norm_host}")"
+    cors_csv="$(append_csv_item "$cors_csv" "http://${norm_host}")"
+  fi
+
+  cat > "$API_ENV_FILE" <<EOF
+DATABASE_URL="$db_url"
+PORT="$API_PORT"
+APP_VERSION="$(project_version)"
+ADMIN_USERNAME="$ADMIN_USERNAME"
+ADMIN_PASSWORD="$ADMIN_PASSWORD"
+ADMIN_TOKEN="$admin_token"
+OPENAI_BASE_URL="$existing_api_base"
+OPENAI_API_KEY="$existing_api_key"
+OPENAI_EMBEDDING_API_KEY="$existing_embed_key"
+OPENAI_MODEL="$existing_model"
+OPENAI_EMBEDDING_MODEL="$existing_embed_model"
+WEB_ORIGIN="$web_origin"
+CORS_ALLOWED_ORIGINS="$cors_csv"
+EOF
+
+  cat > "$WEB_ENV_FILE" <<EOF
+VITE_API_BASE_URL=/api
+VITE_WS_BASE_URL=/ws
+VITE_ALLOWED_HOSTS=all
+EOF
+
+  chmod 600 "$API_ENV_FILE" || true
+}
+
+update_code() {
+  log_step "[5/7] 更新代码"
+
+  if [[ "$SKIP_GIT" == "1" ]]; then
+    log_info "跳过 Git 更新（--skip-git）"
+    return 0
+  fi
+
+  if ! have_cmd git || [[ ! -d "$ROOT_DIR/.git" ]]; then
+    log_warn "当前不是 Git 仓库，跳过更新"
+    return 0
+  fi
+
+  cd "$ROOT_DIR"
+
+  if ! git fetch origin "$BRANCH"; then
+    log_warn "git fetch 失败，继续使用本地代码"
+    return 0
+  fi
+
+  local dirty
+  dirty="$(git status --porcelain || true)"
+  if [[ -n "$dirty" ]]; then
+    echo "检测到本地未提交改动:"
+    echo "$dirty" | head -n 20
+    if confirm_yes "是否丢弃本地改动并继续更新？[y/N]: "; then
+      git reset --hard HEAD
+      git clean -fd
+    else
+      log_warn "保留本地改动，跳过 Git 拉取"
+      return 0
+    fi
+  fi
+
+  if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git checkout "$BRANCH"
+  elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    git checkout -b "$BRANCH" "origin/$BRANCH"
+  fi
+
+  if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    git pull --ff-only origin "$BRANCH"
+  fi
+
+  find "$ROOT_DIR" -maxdepth 1 \( -name '*.sh' -o -name 'mw' \) -type f -exec sed -i 's/\r$//' {} +
+  log_info "代码更新完成"
+}
+
+stop_mindwall_services() {
+  if ! have_cmd systemctl; then
+    return 0
+  fi
+
+  as_root systemctl stop "$SYSTEMD_API_SERVICE" 2>/dev/null || true
+  as_root systemctl stop "$SYSTEMD_WEB_SERVICE" 2>/dev/null || true
+  sleep 1
+}
+
+stop_legacy_mindwall_processes() {
+  if ! have_cmd ps; then
+    return 0
+  fi
+
+  local pids
+  pids="$(ps -eo pid,args | grep -F "$ROOT_DIR" | grep -E 'vite preview|mindwall-web-server\.cjs|apps/api/dist' | grep -v grep | awk '{print $1}' || true)"
+  if [[ -n "$pids" ]]; then
+    log_warn "检测到旧版 MindWall 进程，正在停止: $pids"
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 1
   fi
 }
 
-write_web_env() {
-  cat > "$WEB_ENV_PROD_FILE" <<'EOF'
-VITE_API_BASE_URL=/api
-VITE_WS_BASE_URL=
-EOF
+check_ports() {
+  log_step "[6/7] 端口占用检查"
+
+  validate_port "$API_PORT" || die "API 端口非法: $API_PORT"
+  validate_port "$WEB_PORT" || die "Web 端口非法: $WEB_PORT"
+  validate_port "$PG_PORT" || die "PG 端口非法: $PG_PORT"
+  validate_port "$REDIS_PORT" || die "Redis 端口非法: $REDIS_PORT"
+
+  [[ "$API_PORT" != "$WEB_PORT" ]] || die "API 和 Web 端口不能相同"
+
+  if port_in_use "$API_PORT"; then
+    log_error "API 端口 $API_PORT 已被占用"
+    port_owner_summary "$API_PORT"
+    die "请改用 --api-port"
+  fi
+
+  if port_in_use "$WEB_PORT"; then
+    log_error "Web 端口 $WEB_PORT 已被占用"
+    port_owner_summary "$WEB_PORT"
+    die "请改用 --web-port"
+  fi
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  Web 闈欐€佹湇鍔″櫒 + API 鍙嶅悜浠ｇ悊锛堝唴寤猴紝涓嶄緷璧?Nginx锛?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?write_web_server() {
+install_and_build() {
+  log_step "[7/7] 安装依赖、迁移数据库、构建"
+
+  npm_install_dir "$API_DIR"
+  (cd "$API_DIR" && npm_exec run prisma:generate)
+  (cd "$API_DIR" && npm_exec run prisma:deploy)
+  (cd "$API_DIR" && npm_exec run build)
+
+  npm_install_dir "$WEB_DIR"
+  ensure_rollup_native
+  if ! (cd "$WEB_DIR" && npm_exec run build); then
+    log_warn "Web 构建失败，执行依赖修复后重试"
+    rm -rf "$WEB_DIR/node_modules"
+    npm_install_dir "$WEB_DIR"
+    ensure_rollup_native
+    (cd "$WEB_DIR" && npm_exec run build)
+  fi
+}
+
+write_web_server() {
   mkdir -p "$RUNTIME_DIR"
-  cat > "$RUNTIME_WEB_SERVER_FILE" <<'WEBEOF'
+  cat > "$RUNTIME_WEB_SERVER_FILE" <<'EOF'
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
-const { URL } = require('node:url');
 
 const WEB_PORT = Number(process.env.WEB_PORT || 3001);
 const API_PORT = Number(process.env.API_PORT || 3100);
@@ -527,104 +836,142 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-function sendJson(res, status, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+function sendJson(res, status, data) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+  });
   res.end(body);
 }
 
-function safePath(pathname) {
-  const norm = path.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '');
-  const full = path.join(WEB_DIST_DIR, norm);
+function toSafeFile(requestPath) {
+  const cleaned = path.normalize(requestPath).replace(/^(\.\.(\/|\\|$))+/, '');
+  const full = path.join(WEB_DIST_DIR, cleaned);
   const rel = path.relative(WEB_DIST_DIR, full);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
   return full;
 }
 
-function proxyHttp(req, res) {
+function proxyApi(req, res) {
   const parsed = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-  let upPath = parsed.pathname;
-  if (upPath === '/api') upPath = '/';
-  else if (upPath.startsWith('/api/')) upPath = upPath.slice(4);
-  const finalPath = `${upPath}${parsed.search || ''}`;
+  let upstreamPath = parsed.pathname;
+  if (upstreamPath === '/api') {
+    upstreamPath = '/';
+  } else if (upstreamPath.startsWith('/api/')) {
+    upstreamPath = upstreamPath.slice(4);
+  }
 
-  const upReq = http.request({
-    host: '127.0.0.1', port: API_PORT, method: req.method,
-    path: finalPath, headers: { ...req.headers, host: `127.0.0.1:${API_PORT}` },
-  }, (upRes) => {
-    res.writeHead(upRes.statusCode || 502, upRes.headers);
-    upRes.pipe(res);
+  const upstreamReq = http.request(
+    {
+      host: '127.0.0.1',
+      port: API_PORT,
+      method: req.method,
+      path: `${upstreamPath}${parsed.search || ''}`,
+      headers: {
+        ...req.headers,
+        host: `127.0.0.1:${API_PORT}`,
+      },
+    },
+    (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    },
+  );
+
+  upstreamReq.on('error', (err) => {
+    sendJson(res, 502, { message: 'API 不可用', detail: String(err.message || err) });
   });
-  upReq.on('error', (e) => sendJson(res, 502, { message: 'API 涓嶅彲杈?, detail: String(e.message) }));
-  req.pipe(upReq);
+
+  req.pipe(upstreamReq);
 }
 
 function serveStatic(req, res) {
   const parsed = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   let pathname = decodeURIComponent(parsed.pathname || '/');
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  let fp = safePath(pathname);
-  if (!fp || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) fp = path.join(WEB_DIST_DIR, 'index.html');
-  fs.readFile(fp, (err, data) => {
-    if (err) { sendJson(res, 404, { message: '椤甸潰涓嶅瓨鍦? }); return; }
-    const ext = path.extname(fp).toLowerCase();
+  if (pathname.endsWith('/')) {
+    pathname += 'index.html';
+  }
+
+  let filePath = toSafeFile(pathname);
+  if (!filePath || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(WEB_DIST_DIR, 'index.html');
+  }
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      sendJson(res, 404, { message: '页面不存在' });
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    res.end(data);
+    res.end(content);
   });
 }
 
-function proxyWs(req, socket, head) {
-  const up = net.connect(API_PORT, '127.0.0.1');
-  up.on('connect', () => {
-    let hdrs = '';
+function proxyWebsocket(req, socket, head) {
+  const upstream = net.connect(API_PORT, '127.0.0.1');
+
+  upstream.on('connect', () => {
+    let headerLines = '';
     for (const [k, v] of Object.entries(req.headers)) {
       if (k.toLowerCase() === 'host') continue;
-      if (Array.isArray(v)) v.forEach(i => { hdrs += `${k}: ${i}\r\n`; });
-      else if (v !== undefined) hdrs += `${k}: ${v}\r\n`;
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          headerLines += `${k}: ${item}\r\n`;
+        }
+      } else if (v !== undefined) {
+        headerLines += `${k}: ${v}\r\n`;
+      }
     }
-    hdrs += `host: 127.0.0.1:${API_PORT}\r\n\r\n`;
-    up.write(`${req.method} ${req.url || '/'} HTTP/${req.httpVersion}\r\n${hdrs}`);
-    if (head && head.length) up.write(head);
-    socket.pipe(up).pipe(socket);
+    headerLines += `host: 127.0.0.1:${API_PORT}\r\n\r\n`;
+    upstream.write(`${req.method} ${req.url || '/'} HTTP/${req.httpVersion}\r\n${headerLines}`);
+    if (head && head.length) {
+      upstream.write(head);
+    }
+    socket.pipe(upstream).pipe(socket);
   });
-  up.on('error', () => socket.destroy());
-  socket.on('error', () => up.destroy());
+
+  upstream.on('error', () => socket.destroy());
+  socket.on('error', () => upstream.destroy());
 }
 
 const server = http.createServer((req, res) => {
-  const p = (req.url || '/').split('?')[0];
-  if (p === '/api' || p.startsWith('/api/')) { proxyHttp(req, res); return; }
+  const pathname = (req.url || '/').split('?')[0];
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
+    proxyApi(req, res);
+    return;
+  }
   serveStatic(req, res);
 });
-server.on('upgrade', (req, socket, head) => {
-  const p = (req.url || '/').split('?')[0];
-  if (!p.startsWith('/ws/')) { socket.destroy(); return; }
-  proxyWs(req, socket, head);
-});
-server.listen(WEB_PORT, '0.0.0.0', () => {
-  process.stdout.write(`MindWall Web listening :${WEB_PORT} -> API :${API_PORT}\n`);
-});
-WEBEOF
-}
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  systemd 鏈嶅姟绠＄悊
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?stop_our_services() {
-  have_command systemctl || return 0
-  as_root systemctl stop "$SYSTEMD_API_SERVICE" 2>/dev/null || true
-  as_root systemctl stop "$SYSTEMD_WEB_SERVICE" 2>/dev/null || true
-  sleep 1
+server.on('upgrade', (req, socket, head) => {
+  const pathname = (req.url || '/').split('?')[0];
+  if (!pathname.startsWith('/ws')) {
+    socket.destroy();
+    return;
+  }
+  proxyWebsocket(req, socket, head);
+});
+
+server.listen(WEB_PORT, '0.0.0.0', () => {
+  process.stdout.write(`MindWall Web listening on :${WEB_PORT}, proxy API :${API_PORT}\n`);
+});
+EOF
 }
 
 setup_api_service() {
-  have_command systemctl || die "绯荤粺涓嶆敮鎸?systemd"
+  have_cmd systemctl || die "系统不支持 systemd"
 
-  local entry="$API_DIR/dist/src/main.js"
-  [[ -f "$entry" ]] || entry="$API_DIR/dist/main.js"
-  [[ -f "$entry" ]] || die "API 鏋勫缓浜х墿涓嶅瓨鍦?
+  local api_entry="$API_DIR/dist/src/main.js"
+  [[ -f "$api_entry" ]] || api_entry="$API_DIR/dist/main.js"
+  [[ -f "$api_entry" ]] || die "找不到 API 构建产物"
 
   cat > /tmp/mindwall-api.service <<EOF
 [Unit]
-Description=MindWall API
+Description=MindWall API Service
 After=network.target docker.service
 Wants=docker.service
 
@@ -633,8 +980,8 @@ Type=simple
 WorkingDirectory=$API_DIR
 Environment=NODE_ENV=production
 Environment="PATH=$NODE_RUNTIME_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-EnvironmentFile=$API_ENV_FILE
-ExecStart=$NODE_BIN $entry
+EnvironmentFile=-$API_ENV_FILE
+ExecStart=$NODE_BIN $api_entry
 Restart=always
 RestartSec=3
 User=root
@@ -642,6 +989,7 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
+
   as_root mv /tmp/mindwall-api.service "$SYSTEMD_API_FILE"
   as_root systemctl daemon-reload
   as_root systemctl enable "$SYSTEMD_API_SERVICE"
@@ -649,14 +997,14 @@ EOF
 }
 
 setup_web_service() {
-  have_command systemctl || die "绯荤粺涓嶆敮鎸?systemd"
+  have_cmd systemctl || die "系统不支持 systemd"
   write_web_server
 
   cat > /tmp/mindwall-web.service <<EOF
 [Unit]
-Description=MindWall Web
-After=network.target mindwall-api.service
-Wants=mindwall-api.service
+Description=MindWall Web Service
+After=network.target $SYSTEMD_API_SERVICE.service
+Wants=$SYSTEMD_API_SERVICE.service
 
 [Service]
 Type=simple
@@ -674,314 +1022,110 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
+
   as_root mv /tmp/mindwall-web.service "$SYSTEMD_WEB_FILE"
   as_root systemctl daemon-reload
   as_root systemctl enable "$SYSTEMD_WEB_SERVICE"
   as_root systemctl restart "$SYSTEMD_WEB_SERVICE"
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  鍋ュ悍妫€鏌ワ紙瀛︿範鑷?Minimal-Server-Deploy锛?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?health_check() {
-  log_info "鍋ュ悍妫€鏌ヤ腑..."
-  local retries=15 ok=0
-
-  # 妫€鏌?API
+wait_http_ok() {
+  local url="$1"
+  local retries="${2:-20}"
   while (( retries > 0 )); do
-    if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
-      ok=1; break
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
     fi
-    sleep 2; retries=$((retries - 1))
+    sleep 2
+    retries=$((retries - 1))
   done
-  if (( ok == 0 )); then
-    log_error "API 鍋ュ悍妫€鏌ュけ璐ワ紙30 绉掑唴鏃犲搷搴旓級"
-    log_warn "鎺掓煡鍛戒护: journalctl -u mindwall-api -n 50 --no-pager"
-    as_root journalctl -u "$SYSTEMD_API_SERVICE" -n 15 --no-pager 2>/dev/null || true
-    return 1
-  fi
-  log_info "API 鍋ュ悍妫€鏌ラ€氳繃 (127.0.0.1:$API_PORT)"
-
-  # 妫€鏌?Web
-  sleep 1
-  if curl -sf "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1; then
-    log_info "Web 鍋ュ悍妫€鏌ラ€氳繃 (0.0.0.0:$WEB_PORT)"
-  else
-    log_warn "Web 鏈嶅姟鏈搷搴旓紝鎺掓煡: journalctl -u mindwall-web -n 50 --no-pager"
-  fi
-  return 0
+  return 1
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  7 姝ラ儴缃叉祦绋?# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
-setup_interactive_config() {
-  [[ "$YES" == "1" ]] && return 0
-
-  # 鈹€鈹€ 鍏綉鍩熷悕 鈹€鈹€
-  if [[ -z "$PUBLIC_HOST" ]]; then
-    echo
-    read -r -p "$(echo -e "${CYAN}鍏綉鍩熷悕锛堝 example.com锛岀洿鎺ュ洖杞﹁烦杩囷級锛?{NC}")" input_host
-    [[ -n "$input_host" ]] && PUBLIC_HOST="$input_host"
-  fi
-
-  # 鈹€鈹€ 绠＄悊鍛樺嚟鎹紙棣栨閮ㄧ讲鎴栧瘑鐮佷负榛樿鍊兼椂鎻愮ず锛?鈹€鈹€
-  local current_pw=""
-  if [[ -f "$API_ENV_FILE" ]]; then
-    current_pw="$(grep -E '^ADMIN_PASSWORD=' "$API_ENV_FILE" | tail -1 | sed 's/^ADMIN_PASSWORD=//' | sed 's/^"//;s/"$//' || true)"
-  fi
-
-  if [[ -z "$current_pw" || "$current_pw" == "change-this-admin-password" || "$current_pw" == "mindwall-admin" ]]; then
-    echo
-    log_info "棣栨閮ㄧ讲 鈥?璁剧疆绠＄悊鍚庡彴鍑嵁"
-    read -r -p "$(echo -e "${CYAN}绠＄悊鍛樼敤鎴峰悕锛堥粯璁?admin锛夛細${NC}")" input_admin_user
-    [[ -n "$input_admin_user" ]] && ADMIN_USERNAME="$input_admin_user" || ADMIN_USERNAME="admin"
-
-    while true; do
-      read -r -s -p "$(echo -e "${CYAN}绠＄悊鍛樺瘑鐮侊紙鐩存帴鍥炶溅鑷姩鐢熸垚锛夛細${NC}")" input_admin_pw
-      echo
-      if [[ -n "$input_admin_pw" ]]; then
-        if (( ${#input_admin_pw} < 6 )); then
-          log_warn "瀵嗙爜鑷冲皯 6 浣嶏紝璇烽噸鏂拌緭鍏?
-          continue
-        fi
-        ADMIN_PASSWORD="$input_admin_pw"
-      else
-        ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
-        log_info "宸茶嚜鍔ㄧ敓鎴愮鐞嗗憳瀵嗙爜: ${BOLD}${ADMIN_PASSWORD}${NC}"
-      fi
-      break
-    done
-  else
-    log_info "绠＄悊鍛樺瘑鐮佸凡閰嶇疆锛岃烦杩囪缃紙濡傞渶淇敼璇风紪杈?$API_ENV_FILE锛?
-  fi
-}
-
-step_1_preflight() {
-  log_step "[1/7] 鐜妫€娴嬩笌瀹夊叏妫€鏌?
-  require_root
-  detect_os
-  detect_pkg_manager
-  load_saved_ports
-  preflight_check_ports
-  backup_data
-  setup_interactive_config
-  log_info "绯荤粺: ${OS_ID:-鏈煡}  鍖呯鐞嗗櫒: $PKG_MANAGER"
-  log_info "绔彛鍒嗛厤: API=$API_PORT  Web=$WEB_PORT  PG=$PG_PORT  Redis=$REDIS_PORT"
-  [[ -n "$PUBLIC_HOST" ]] && log_info "鍏綉鍩熷悕: $PUBLIC_HOST"
-}
-
-step_2_system_deps() {
-  log_step "[2/7] 瀹夎绯荤粺渚濊禆"
-  if [[ "$SKIP_SYSTEM_INSTALL" == "1" ]]; then
-    log_info "璺宠繃锛?-skip-system-install锛?; return
-  fi
-  pkg_update_cache
-  case "$PKG_MANAGER" in
-    apt)      pkg_install ca-certificates curl git tar xz-utils lsof jq ;;
-    dnf|yum)  pkg_install ca-certificates curl git tar xz lsof jq ;;
-    zypper)   pkg_install ca-certificates curl git tar xz lsof jq ;;
-    pacman)   pkg_install ca-certificates curl git tar xz lsof jq ;;
-    *) die "涓嶆敮鎸佺殑绯荤粺" ;;
-  esac
-  log_info "绯荤粺渚濊禆灏辩华"
-}
-
-step_3_docker() {
-  log_step "[3/7] 鍚姩 Docker (PostgreSQL + Redis)"
-  if [[ "$NO_DOCKER" == "1" ]]; then
-    log_info "璺宠繃锛?-no-docker锛?; return
-  fi
-
-  install_docker_if_needed
-  [[ -f "$COMPOSE_FILE" ]] || die "鎵句笉鍒?$COMPOSE_FILE"
-
-  cat > "$ROOT_DIR/infra/.env" <<EOF
-MW_PG_PORT=$PG_PORT
-MW_REDIS_PORT=$REDIS_PORT
-MW_PG_PASSWORD=mindwall
-EOF
-
-  # 杩佺Щ鏃?Compose 椤圭洰鍚嶄笉鍚岀殑瀹瑰櫒
-  for c in mindwall-postgres mindwall-redis; do
-    if as_root docker inspect "$c" >/dev/null 2>&1; then
-      local old_proj
-      old_proj="$(as_root docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$c" 2>/dev/null || true)"
-      if [[ -n "$old_proj" && "$old_proj" != "mindwall" ]]; then
-        log_warn "杩佺Щ鏃у鍣?$c锛?old_proj -> mindwall锛?
-        as_root docker stop "$c" 2>/dev/null || true
-        as_root docker rm "$c" 2>/dev/null || true
-      fi
-    fi
-  done
-
-  docker_compose_cmd up -d postgres redis
-
-  log_info "绛夊緟 PostgreSQL 灏辩华..."
-  local retries=60 ok=0
-  while (( retries > 0 )); do
-    if as_root docker exec mindwall-postgres pg_isready -U mindwall -d mindwall >/dev/null 2>&1; then
-      ok=1; break
-    fi
-    sleep 2; retries=$((retries - 1))
-  done
-  if (( ok == 0 )); then
-    as_root docker logs --tail 20 mindwall-postgres 2>&1 || true
-    die "PostgreSQL 鍚姩瓒呮椂"
-  fi
-  log_info "PostgreSQL (绔彛 $PG_PORT) + Redis (绔彛 $REDIS_PORT) 灏辩华"
-}
-
-step_4_node() {
-  log_step "[4/7] 鍑嗗 Node.js 杩愯鏃?
-  ensure_node_runtime
-}
-
-step_5_git() {
-  log_step "[5/7] 鏇存柊浠ｇ爜"
-  if [[ "$SKIP_GIT" == "1" ]]; then
-    log_info "璺宠繃锛?-skip-git锛?; return
-  fi
-  if ! have_command git || [[ ! -d "$ROOT_DIR/.git" ]]; then
-    log_warn "闈?Git 浠撳簱锛岃烦杩囦唬鐮佹洿鏂?; return
-  fi
-
-  cd "$ROOT_DIR"
-  git fetch origin "$BRANCH" || { log_warn "git fetch 澶辫触锛屼娇鐢ㄦ湰鍦颁唬鐮?; return; }
-
-  local dirty; dirty="$(git status --porcelain || true)"
-  if [[ -n "$dirty" ]]; then
-    echo "$dirty" | head -n 10
-    if confirm_yes "妫€娴嬪埌鏈湴鏀瑰姩锛屼涪寮冨苟鏇存柊锛?[y/N]: "; then
-      git reset --hard HEAD
-      git clean -fd
-    else
-      log_warn "淇濈暀鏈湴鏀瑰姩锛岃烦杩?Git 鎷夊彇"; return
-    fi
-  fi
-
-  if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    git checkout "$BRANCH"
-  elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-    git checkout -b "$BRANCH" "origin/$BRANCH"
-  fi
-
-  git show-ref --verify --quiet "refs/remotes/origin/$BRANCH" && git pull --ff-only origin "$BRANCH"
-
-  # 淇鍙兘鐨?CRLF 鎹㈣绗︼紙Windows Git 鍙兘娉ㄥ叆 \r锛?  find "$ROOT_DIR" -maxdepth 1 \( -name '*.sh' -o -name 'mw' \) -exec sed -i 's/\r$//' {} +
-
-  log_info "浠ｇ爜宸叉洿鏂板埌鍒嗘敮 $BRANCH"
-}
-
-step_6_build() {
-  log_step "[6/7] 瀹夎渚濊禆銆佽縼绉绘暟鎹簱銆佹瀯寤?
-
-  stop_our_services
-  save_runtime_ports
-  write_api_env
-  write_web_env
-
-  # --- API ---
-  log_info "瀹夎 API 渚濊禆..."
-  npm_install_dir "$API_DIR"
-  log_info "Prisma generate + migrate..."
-  cd "$API_DIR" && npm_cmd run prisma:generate
-  cd "$API_DIR" && npm_cmd run prisma:deploy
-  log_info "鏋勫缓 API..."
-  cd "$API_DIR" && npm_cmd run build
-
-  # --- Web ---
-  log_info "瀹夎 Web 渚濊禆..."
-  npm_install_dir "$WEB_DIR"
-  ensure_rollup_compat
-  log_info "鏋勫缓 Web..."
-  cd "$WEB_DIR"
-  if ! npm_cmd run build; then
-    log_warn "Web 鏋勫缓澶辫触锛屼慨澶嶄緷璧栧悗閲嶈瘯..."
-    ensure_rollup_compat
-    rm -rf "$WEB_DIR/node_modules"
-    npm_install_dir "$WEB_DIR"
-    ensure_rollup_compat
-    npm_cmd run build
-  fi
-
-  log_info "鍏ㄩ儴鏋勫缓瀹屾垚"
-}
-
-step_7_start() {
-  log_step "[7/7] 鍚姩鏈嶅姟 + 鍋ュ悍妫€鏌?
+start_services() {
+  log_step "[8/8] 启动 systemd 服务"
 
   setup_api_service
   sleep 2
   if ! as_root systemctl is-active --quiet "$SYSTEMD_API_SERVICE"; then
-    as_root journalctl -u "$SYSTEMD_API_SERVICE" -n 30 --no-pager || true
-    die "mindwall-api 鍚姩澶辫触"
+    as_root journalctl -u "$SYSTEMD_API_SERVICE" -n 50 --no-pager || true
+    die "mindwall-api 启动失败"
   fi
-  log_info "mindwall-api 宸插惎鍔?
 
   setup_web_service
   sleep 2
   if ! as_root systemctl is-active --quiet "$SYSTEMD_WEB_SERVICE"; then
-    as_root journalctl -u "$SYSTEMD_WEB_SERVICE" -n 30 --no-pager || true
-    die "mindwall-web 鍚姩澶辫触"
+    as_root journalctl -u "$SYSTEMD_WEB_SERVICE" -n 50 --no-pager || true
+    die "mindwall-web 启动失败"
   fi
-  log_info "mindwall-web 宸插惎鍔?
 
-  health_check || true
+  if ! wait_http_ok "http://127.0.0.1:${API_PORT}/health" 20; then
+    log_warn "API 健康检查未通过，请检查日志: journalctl -u mindwall-api -f"
+  fi
+
+  if ! wait_http_ok "http://127.0.0.1:${WEB_PORT}/" 10; then
+    log_warn "Web 健康检查未通过，请检查日志: journalctl -u mindwall-web -f"
+  fi
 }
 
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?#  閮ㄧ讲瀹屾垚鎶ュ憡
-# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?print_summary() {
-  local host; host="$(resolve_host)"
+register_mw_command() {
+  if [[ ! -f "$ROOT_DIR/mw" ]]; then
+    return 0
+  fi
+  chmod +x "$ROOT_DIR/mw" || true
+  ln -sfn "$ROOT_DIR/mw" /usr/local/bin/mw || true
+}
+
+print_summary() {
+  local host
+  host="$(resolve_host_for_display)"
+
   echo
-  echo -e "${GREEN}${BOLD}鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲${NC}"
-  echo -e "${GREEN}${BOLD}  MindWall v$(project_version) 閮ㄧ讲瀹屾垚${NC}"
-  echo -e "${GREEN}${BOLD}鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲${NC}"
-  echo -e "  妯″紡:      ${GREEN}鐙珛妯″紡${NC}锛堜笉褰卞搷 Nginx / PM2 / 鍏朵粬鏈嶅姟锛?
+  echo -e "${GREEN}${BOLD}部署完成: MindWall v$(project_version)${NC}"
+  echo "API 端口: $API_PORT"
+  echo "Web 端口: $WEB_PORT"
+  echo "Web 地址: http://${host}:${WEB_PORT}"
+  echo "本地 Node 路径: $NODE_RUNTIME_DIR"
+  echo "服务状态命令: systemctl status mindwall-api mindwall-web"
+  echo "日志命令: journalctl -u mindwall-api -f / journalctl -u mindwall-web -f"
+
   if [[ -n "$PUBLIC_HOST" ]]; then
-    echo -e "  鍏綉鍦板潃:  ${CYAN}https://${PUBLIC_HOST}${NC}"
+    echo "公网访问地址: https://$(normalize_public_host "$PUBLIC_HOST")"
+  else
+    echo "提示: 如需展示公网域名，请加参数 --public-host your.domain.com"
   fi
-  echo -e "  Web 鍦板潃:  ${CYAN}http://${host}:${WEB_PORT}${NC}"
-  echo -e "  API 绔彛:  $API_PORT锛堜粎 127.0.0.1锛?
-  echo -e "  Web 绔彛:  $WEB_PORT锛?.0.0.0 瀵瑰锛?
-  [[ "$NO_DOCKER" != "1" ]] && echo -e "  PG 绔彛:   $PG_PORT    Redis: $REDIS_PORT"
-  echo -e "  Node 璺緞: $NODE_RUNTIME_DIR"
-  echo -e "  鏈嶅姟:      mindwall-api + mindwall-web"
-  echo
 
-  # 绠＄悊鍚庡彴淇℃伅
-  local admin_base="http://${host}:${WEB_PORT}"
-  [[ -n "$PUBLIC_HOST" ]] && admin_base="https://${PUBLIC_HOST}"
-  echo -e "  ${YELLOW}绠＄悊鍚庡彴:${NC}  ${CYAN}${admin_base}/admin/login${NC}"
-  local show_user; show_user="$(grep -E '^ADMIN_USERNAME=' "$API_ENV_FILE" 2>/dev/null | tail -1 | sed 's/^ADMIN_USERNAME=//' | sed 's/^"//;s/"$//' || echo 'admin')"
-  echo -e "  ${YELLOW}绠＄悊鍛?${NC}    ${show_user}"
-  if [[ -n "$ADMIN_PASSWORD" ]]; then
-    echo -e "  ${YELLOW}瀵嗙爜:${NC}      ${BOLD}${ADMIN_PASSWORD}${NC}  鈫?${RED}璇风珛鍗宠褰曞苟濡ュ杽淇濆瓨${NC}"
-  fi
-  echo
-
-  echo -e "  绠＄悊:  ${CYAN}mw status${NC}     鏌ョ湅杩愯鐘舵€?
-  echo -e "         ${CYAN}mw logs${NC}       鏌ョ湅 API 鏃ュ織"
-  echo -e "         ${CYAN}mw update${NC}     蹇€熸洿鏂?
-  echo -e "         ${CYAN}mw restart${NC}    閲嶅惎鏈嶅姟"
-  echo -e "         ${CYAN}mw uninstall${NC}  鍗歌浇鏈嶅姟"
-  echo -e "         ${CYAN}mw menu${NC}       浜や簰鑿滃崟"
-  echo
-  if [[ -n "$host" ]] && [[ "$host" =~ ^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.) ]]; then
-    [[ -z "$PUBLIC_HOST" ]] && log_warn "褰撳墠涓哄唴缃?IP锛?host锛夛紝鍏綉璁块棶璇蜂娇鐢?--public-host 鎸囧畾鍩熷悕"
-  fi
-  echo -e "  ${YELLOW}鎻愮ず:${NC} 濡傛灉闇€瑕?Nginx 鍙嶄唬锛屽弬鑰? infra/mindwall-nginx.conf.template"
-  echo -e "  ${YELLOW}鎻愮ず:${NC} 鍏綉璁块棶璇风‘淇濆畨鍏ㄧ粍/闃茬伀澧欐斁琛岀鍙?$WEB_PORT"
-  echo
+  echo "管理员账号: $ADMIN_USERNAME"
+  echo "管理员密码: $ADMIN_PASSWORD"
 }
 
-# 鈹€鈹€鈹€ 鍏ュ彛 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 main() {
   cd "$ROOT_DIR"
-  echo -e "${CYAN}${BOLD}MindWall 閮ㄧ讲鑴氭湰 v2.0${NC}  鈥? 鐩綍: $ROOT_DIR  鍒嗘敮: $BRANCH"
 
-  step_1_preflight
-  step_2_system_deps
-  step_3_docker
-  step_4_node
-  step_5_git
-  step_6_build
-  step_7_start
+  echo -e "${CYAN}${BOLD}MindWall 部署脚本 v2.1${NC}  目录: $ROOT_DIR  分支: $BRANCH"
+
+  require_root
+  validate_project_tree
+  detect_pkg_manager
+  load_saved_ports
+
+  install_system_packages
+  ensure_docker_engine
+  ensure_node_runtime
+
+  update_code
+
+  backup_runtime_files
+  stop_mindwall_services
+  stop_legacy_mindwall_processes
+  check_ports
+
+  save_runtime_ports
+  write_api_env
+  start_infra
+  install_and_build
+  start_services
+  register_mw_command
   print_summary
 }
 

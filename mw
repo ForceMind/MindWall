@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# MindWall 缁堢鍛戒护闈㈡澘 v2.0
-# 瀛︿範鑷?Minimal-Server-Deploy 鐨?zt.sh 鑿滃崟寮忕鐞?head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
+if head -n 1 "$0" | grep -q $'\r'; then
+  sed -i 's/\r$//' "$0"
+  exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 GREEN='\033[0;32m'
@@ -23,30 +26,53 @@ VERSION_FILE="$ROOT_DIR/VERSION"
 RUNTIME_PORTS_FILE="$ROOT_DIR/.mw-runtime/ports.env"
 
 COMMAND="${1:-auto}"
-if [[ $# -gt 0 ]]; then shift; fi
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
-# 鍏煎: mw --yes => mw auto --yes
 if [[ "${COMMAND#--}" != "$COMMAND" ]]; then
   set -- "$COMMAND" "$@"
   COMMAND="auto"
 fi
 
 project_version() {
-  [[ -f "$VERSION_FILE" ]] && tr -d '[:space:]' < "$VERSION_FILE" || echo "鏈煡"
+  if [[ -f "$VERSION_FILE" ]]; then
+    tr -d '[:space:]' < "$VERSION_FILE"
+  else
+    echo "unknown"
+  fi
 }
 
 usage() {
   cat <<EOF
-${CYAN}${BOLD}MindWall 缁堢鍛戒护闈㈡澘 v2.0${NC}
+MindWall 终端面板 v$(project_version)
 
-鐙珛妯″紡閮ㄧ讲锛屼笉褰卞搷 Nginx / PM2 / 鍏朵粬鏈嶅姟銆?
-${BOLD}鐢ㄦ硶:${NC}
-  mw                      鑷姩妯″紡锛堝凡閮ㄧ讲鍒欐洿鏂帮紝鏈儴缃插垯瀹夎锛?  mw deploy [鍙傛暟]        棣栨閮ㄧ讲 / 瀹屾暣閮ㄧ讲
-  mw update [鍙傛暟]        蹇€熸洿鏂?  mw status               鏌ョ湅杩愯鐘舵€?  mw restart              閲嶅惎鎵€鏈夋湇鍔?  mw stop                 鍋滄鎵€鏈夋湇鍔?  mw logs [api|web]       鏌ョ湅瀹炴椂鏃ュ織锛堥粯璁?API锛?  mw backup               澶囦唤褰撳墠閰嶇疆
-  mw uninstall [鍙傛暟]     鍗歌浇鏈嶅姟
-  mw menu                 浜や簰鑿滃崟
-  mw help                 鏌ョ湅甯姪
+用法:
+  mw                          自动模式（已安装则 update，否则 deploy）
+  mw deploy [参数]            首次部署/完整部署
+  mw update [参数]            快速更新
+  mw status                   查看服务与端口状态
+  mw restart                  重启 API + Web
+  mw stop                     停止 API + Web
+  mw logs [api|web]           查看日志（默认 api）
+  mw backup                   备份运行配置
+  mw uninstall [参数]         卸载
+  mw menu                     打开交互菜单
+  mw help                     显示帮助
 EOF
+}
+
+run_as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return $?
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return $?
+  fi
+  echo "错误: 需要 root 权限且系统未安装 sudo" >&2
+  return 1
 }
 
 load_ports() {
@@ -54,6 +80,7 @@ load_ports() {
   WEB_PORT=""
   PG_PORT=""
   REDIS_PORT=""
+
   if [[ -f "$RUNTIME_PORTS_FILE" ]]; then
     API_PORT="$(grep -E '^API_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
     WEB_PORT="$(grep -E '^WEB_PORT=' "$RUNTIME_PORTS_FILE" | tail -1 | cut -d= -f2- || true)"
@@ -66,135 +93,144 @@ is_installed() {
   [[ -f /etc/systemd/system/mindwall-api.service ]] && [[ -f "$DEPLOY_SCRIPT" ]]
 }
 
-service_status() {
-  local name="$1"
-  if command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet "$name" 2>/dev/null; then
-      echo -e "${GREEN}杩愯涓?{NC}"
-    else
-      echo -e "${RED}鏈繍琛?{NC}"
-    fi
+service_status_text() {
+  local service_name="$1"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo -e "${YELLOW}未知${NC}"
+    return
+  fi
+  if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+    echo -e "${GREEN}运行中${NC}"
   else
-    echo -e "${YELLOW}鏈煡${NC}"
+    echo -e "${RED}未运行${NC}"
   fi
 }
 
 run_deploy() {
-  [[ -f "$DEPLOY_SCRIPT" ]] || { echo "閿欒: 缂哄皯 $DEPLOY_SCRIPT"; exit 1; }
+  [[ -f "$DEPLOY_SCRIPT" ]] || { echo "错误: 未找到 $DEPLOY_SCRIPT"; exit 1; }
   exec bash "$DEPLOY_SCRIPT" "$@"
 }
 
 run_update() {
-  [[ -f "$UPDATE_SCRIPT" ]] || { echo "閿欒: 缂哄皯 $UPDATE_SCRIPT"; exit 1; }
+  [[ -f "$UPDATE_SCRIPT" ]] || { echo "错误: 未找到 $UPDATE_SCRIPT"; exit 1; }
   exec bash "$UPDATE_SCRIPT" "$@"
 }
 
 run_uninstall() {
-  [[ -f "$UNINSTALL_SCRIPT" ]] || { echo "閿欒: 缂哄皯 $UNINSTALL_SCRIPT"; exit 1; }
+  [[ -f "$UNINSTALL_SCRIPT" ]] || { echo "错误: 未找到 $UNINSTALL_SCRIPT"; exit 1; }
   exec bash "$UNINSTALL_SCRIPT" "$@"
 }
 
 show_status() {
   load_ports
+
   echo
-  echo -e "${CYAN}${BOLD}MindWall v$(project_version) 鐘舵€?{NC}"
-  echo -e "鐩綍: $ROOT_DIR"
+  echo -e "${CYAN}${BOLD}MindWall v$(project_version) 状态${NC}"
+  echo "目录: $ROOT_DIR"
   echo
 
-  echo -e "  mindwall-api:  $(service_status mindwall-api)   绔彛: ${API_PORT:-鏈厤缃畗"
-  echo -e "  mindwall-web:  $(service_status mindwall-web)   绔彛: ${WEB_PORT:-鏈厤缃畗"
+  echo -e "  mindwall-api: $(service_status_text mindwall-api)    端口: ${API_PORT:-未记录}"
+  echo -e "  mindwall-web: $(service_status_text mindwall-web)    端口: ${WEB_PORT:-未记录}"
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    local pg_status="鏈繍琛? redis_status="鏈繍琛?
-    docker inspect --format '{{.State.Status}}' mindwall-postgres 2>/dev/null | grep -q running && pg_status="${GREEN}杩愯涓?{NC}"
-    docker inspect --format '{{.State.Status}}' mindwall-redis 2>/dev/null | grep -q running && redis_status="${GREEN}杩愯涓?{NC}"
-    echo -e "  PostgreSQL:    $pg_status   绔彛: ${PG_PORT:-鏈厤缃畗"
-    echo -e "  Redis:         $redis_status   绔彛: ${REDIS_PORT:-鏈厤缃畗"
+    local pg_status="${RED}未运行${NC}"
+    local redis_status="${RED}未运行${NC}"
+    docker inspect --format '{{.State.Status}}' mindwall-postgres 2>/dev/null | grep -q running && pg_status="${GREEN}运行中${NC}"
+    docker inspect --format '{{.State.Status}}' mindwall-redis 2>/dev/null | grep -q running && redis_status="${GREEN}运行中${NC}"
+    echo -e "  PostgreSQL:  $pg_status    端口: ${PG_PORT:-未记录}"
+    echo -e "  Redis:       $redis_status    端口: ${REDIS_PORT:-未记录}"
   fi
 
-  echo
-  if [[ -n "${WEB_PORT:-}" ]]; then
-    local host; host="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')"
-    echo -e "  Web 鍦板潃: ${CYAN}http://${host}:${WEB_PORT}${NC}"
+  if [[ -n "$WEB_PORT" ]]; then
+    local ip
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')"
+    echo
+    echo -e "  Web 访问地址: ${CYAN}http://${ip}:${WEB_PORT}${NC}"
   fi
   echo
 }
 
 show_logs() {
-  if ! command -v journalctl >/dev/null 2>&1; then
-    echo "閿欒: 绯荤粺涓嶆敮鎸?journalctl" >&2; exit 1
-  fi
   local target="${1:-api}"
+  if ! command -v journalctl >/dev/null 2>&1; then
+    echo "错误: 系统没有 journalctl" >&2
+    exit 1
+  fi
+
   case "$target" in
     api) exec journalctl -u mindwall-api -f ;;
     web) exec journalctl -u mindwall-web -f ;;
-    *)   echo "鐢ㄦ硶: mw logs [api|web]"; exit 1 ;;
+    *) echo "用法: mw logs [api|web]"; exit 1 ;;
   esac
 }
 
 do_restart() {
-  echo -e "${CYAN}閲嶅惎 MindWall 鏈嶅姟...${NC}"
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl restart mindwall-api 2>/dev/null || true
-    sudo systemctl restart mindwall-web 2>/dev/null || true
-    sleep 2
-    show_status
-  else
-    echo "閿欒: 绯荤粺涓嶆敮鎸?systemctl" >&2; exit 1
+  echo -e "${CYAN}正在重启 MindWall 服务...${NC}"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "错误: systemctl 不可用" >&2
+    exit 1
   fi
+  run_as_root systemctl restart mindwall-api 2>/dev/null || true
+  run_as_root systemctl restart mindwall-web 2>/dev/null || true
+  sleep 2
+  show_status
 }
 
 do_stop() {
-  echo -e "${CYAN}鍋滄 MindWall 鏈嶅姟...${NC}"
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl stop mindwall-api 2>/dev/null || true
-    sudo systemctl stop mindwall-web 2>/dev/null || true
-    echo -e "${GREEN}宸插仠姝?{NC}"
-  else
-    echo "閿欒: 绯荤粺涓嶆敮鎸?systemctl" >&2; exit 1
+  echo -e "${CYAN}正在停止 MindWall 服务...${NC}"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "错误: systemctl 不可用" >&2
+    exit 1
   fi
+  run_as_root systemctl stop mindwall-api 2>/dev/null || true
+  run_as_root systemctl stop mindwall-web 2>/dev/null || true
+  echo -e "${GREEN}已停止。${NC}"
 }
 
 do_backup() {
-  local ts; ts="$(date +%Y%m%d-%H%M%S)"
-  local bak="$ROOT_DIR/.mw-runtime/backups/$ts"
-  mkdir -p "$bak"
-  [[ -f "$ROOT_DIR/apps/api/.env" ]] && cp "$ROOT_DIR/apps/api/.env" "$bak/api.env"
-  [[ -f "$ROOT_DIR/apps/web/.env.production.local" ]] && cp "$ROOT_DIR/apps/web/.env.production.local" "$bak/web.env.production.local"
-  [[ -f "$RUNTIME_PORTS_FILE" ]] && cp "$RUNTIME_PORTS_FILE" "$bak/ports.env"
-  echo -e "${GREEN}宸插浠藉埌: $bak${NC}"
+  local ts
+  ts="$(date +%Y%m%d-%H%M%S)"
+  local target="$ROOT_DIR/.mw-runtime/backups/manual-$ts"
+  mkdir -p "$target"
+
+  [[ -f "$ROOT_DIR/apps/api/.env" ]] && cp "$ROOT_DIR/apps/api/.env" "$target/api.env"
+  [[ -f "$ROOT_DIR/apps/web/.env.production.local" ]] && cp "$ROOT_DIR/apps/web/.env.production.local" "$target/web.env.production.local"
+  [[ -f "$RUNTIME_PORTS_FILE" ]] && cp "$RUNTIME_PORTS_FILE" "$target/ports.env"
+
+  echo -e "${GREEN}备份完成: $target${NC}"
 }
 
 show_menu() {
   while true; do
     echo
-    echo -e "${CYAN}${BOLD}鈺愨晲鈺愨晲鈺愨晲鈺?MindWall 绠＄悊鑿滃崟 鈺愨晲鈺愨晲鈺愨晲鈺?{NC}"
-    echo -e "  ${BOLD}1)${NC} 鑷姩鎵ц锛堟帹鑽愶級"
-    echo -e "  ${BOLD}2)${NC} 棣栨閮ㄧ讲"
-    echo -e "  ${BOLD}3)${NC} 蹇€熸洿鏂?
-    echo -e "  ${BOLD}4)${NC} 鏌ョ湅鐘舵€?
-    echo -e "  ${BOLD}5)${NC} 閲嶅惎鏈嶅姟"
-    echo -e "  ${BOLD}6)${NC} 鍋滄鏈嶅姟"
-    echo -e "  ${BOLD}7)${NC} 鏌ョ湅 API 鏃ュ織"
-    echo -e "  ${BOLD}8)${NC} 鏌ョ湅 Web 鏃ュ織"
-    echo -e "  ${BOLD}9)${NC} 澶囦唤閰嶇疆"
-    echo -e "  ${BOLD}10)${NC} 鍗歌浇鏈嶅姟"
-    echo -e "  ${BOLD}0)${NC} 閫€鍑?
-    echo -e "${CYAN}${BOLD}鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲${NC}"
-    read -r -p "璇烽€夋嫨 [0-10]: " choice
+    echo -e "${CYAN}${BOLD}======== MindWall 终端面板 ========${NC}"
+    echo "  1) 自动执行（部署或更新）"
+    echo "  2) 首次部署"
+    echo "  3) 快速更新"
+    echo "  4) 查看状态"
+    echo "  5) 重启服务"
+    echo "  6) 停止服务"
+    echo "  7) 查看 API 日志"
+    echo "  8) 查看 Web 日志"
+    echo "  9) 备份配置"
+    echo "  10) 卸载"
+    echo "  0) 退出"
+    echo -e "${CYAN}${BOLD}===================================${NC}"
+
+    read -r -p "请选择 [0-10]: " choice
     case "$choice" in
-      1)  bash "$ROOT_DIR/mw" auto ;;
-      2)  bash "$ROOT_DIR/mw" deploy ;;
-      3)  bash "$ROOT_DIR/mw" update ;;
-      4)  show_status ;;
-      5)  do_restart ;;
-      6)  do_stop ;;
-      7)  show_logs api ;;
-      8)  show_logs web ;;
-      9)  do_backup ;;
+      1) bash "$ROOT_DIR/mw" auto ;;
+      2) bash "$ROOT_DIR/mw" deploy ;;
+      3) bash "$ROOT_DIR/mw" update ;;
+      4) show_status ;;
+      5) do_restart ;;
+      6) do_stop ;;
+      7) show_logs api ;;
+      8) show_logs web ;;
+      9) do_backup ;;
       10) bash "$ROOT_DIR/mw" uninstall ;;
-      0)  exit 0 ;;
-      *)  echo -e "${YELLOW}鏃犳晥閫夐」${NC}" ;;
+      0) exit 0 ;;
+      *) echo -e "${YELLOW}输入无效，请重试。${NC}" ;;
     esac
   done
 }
@@ -202,22 +238,46 @@ show_menu() {
 case "$COMMAND" in
   auto)
     if is_installed; then
-      echo -e "妫€娴嬪埌宸查儴缃诧紝鎵ц${GREEN}蹇€熸洿鏂?{NC}..."
+      echo -e "检测到已安装，执行 ${GREEN}update${NC}..."
       run_update "$@"
     else
-      echo -e "妫€娴嬪埌鏈儴缃诧紝鎵ц${GREEN}棣栨閮ㄧ讲${NC}..."
+      echo -e "检测到未安装，执行 ${GREEN}deploy${NC}..."
       run_deploy "$@"
     fi
     ;;
-  deploy|install) run_deploy "$@" ;;
-  update)         run_update "$@" ;;
-  uninstall)      run_uninstall "$@" ;;
-  status)         show_status ;;
-  restart)        do_restart ;;
-  stop)           do_stop ;;
-  logs)           show_logs "${1:-api}" ;;
-  backup)         do_backup ;;
-  menu)           show_menu ;;
-  help|-h|--help) usage ;;
-  *) echo -e "${RED}閿欒: 鏈瘑鍒懡浠?$COMMAND${NC}"; usage; exit 1 ;;
+  deploy|install)
+    run_deploy "$@"
+    ;;
+  update)
+    run_update "$@"
+    ;;
+  uninstall)
+    run_uninstall "$@"
+    ;;
+  status)
+    show_status
+    ;;
+  restart)
+    do_restart
+    ;;
+  stop)
+    do_stop
+    ;;
+  logs)
+    show_logs "${1:-api}"
+    ;;
+  backup)
+    do_backup
+    ;;
+  menu)
+    show_menu
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo -e "${RED}未知命令: $COMMAND${NC}"
+    usage
+    exit 1
+    ;;
 esac
