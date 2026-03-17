@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { OnboardingModule } from '../../../onboarding/onboarding.module';
 
 @Module({

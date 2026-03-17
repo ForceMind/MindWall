@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -301,6 +301,7 @@ export class SandboxService {
       receiverId: participant.receiverId,
       senderTags,
       receiverTags,
+      resonanceScore: participant.resonanceScore,
     });
 
     const hiddenTagUpdates = this.normalizeHiddenTagUpdateMap(decision.hiddenTagUpdates);
@@ -531,6 +532,7 @@ export class SandboxService {
     text: string;
     senderId: string;
     receiverId: string;
+    resonanceScore: number;
     senderTags: Array<{
       type: UserTagType;
       tag_name: string;
@@ -547,7 +549,7 @@ export class SandboxService {
     const aiConfig = await this.adminConfigService.getAiConfig();
     const apiKey = aiConfig.openaiApiKey;
     if (!apiKey) {
-      return this.fallbackMiddleware(input.text);
+      return this.fallbackMiddleware(input.text, input.resonanceScore);
     }
 
     const senderPublic = input.senderTags
@@ -561,20 +563,26 @@ export class SandboxService {
       .slice(0, 8);
 
     const fallbackPrompt = [
-      'You are MindWall sandbox middleware.',
-      'Evaluate user message for safety and rewrite if needed.',
-      'Return strict JSON only with this schema:',
+      '你是 MindWall 沙盒中间层。',
+      '在用户双方确认破壁前，所有消息都由 AI 总结转述。',
+      '评估消息安全性，并将消息改写为第三人称总结形式。',
+      '例如："你好" → "对方向你打招呼"',
+      '"最近工作好累" → "对方表达了工作方面的疲惫感"',
+      '"我觉得你说得对" → "对方表示认同你的观点"',
+      '"你多大了" → "对方想了解你的年龄"',
+      '',
+      '返回严格 JSON：',
       '{',
       '  "ai_action":"passed|blocked|modified",',
       '  "ai_rewritten_text":"...",',
       '  "hidden_tag_updates":{"harassment_tendency":1.2},',
       '  "reason":"short reason"',
       '}',
-      'Rules:',
-      '- Block if asks for contact exchange, sexual solicitation, insults, threats, coercion.',
-      '- If safe but rough, rewrite to respectful tone.',
-      '- Keep semantic intent while rewriting.',
-      '- hidden_tag_updates values are deltas in range [-2.5, 2.5].',
+      '规则：',
+      '- 如果是索要联系方式、性暗示、侮辱、威胁，设为 blocked',
+      '- 所有安全消息都必须改写为第三人称总结转述形式，ai_action 设为 modified',
+      '- 转述要保留语义但隐去具体措辞，用中文转述',
+      '- hidden_tag_updates 的值是 [-2.5, 2.5] 范围的增量',
     ].join('\n');
     const basePrompt = await this.promptTemplateService.getPrompt(
       'sandbox.middleware',
@@ -583,6 +591,10 @@ export class SandboxService {
 
     const prompt = [
       basePrompt,
+      '',
+      `当前共鸣分: ${input.resonanceScore}`,
+      this.getRelayIntensityInstruction(input.resonanceScore),
+      '',
       `sender_id: ${input.senderId}`,
       `receiver_id: ${input.receiverId}`,
       `sender_public_tags: ${JSON.stringify(senderPublic)}`,
@@ -603,7 +615,7 @@ export class SandboxService {
     });
 
     if (!result) {
-      return this.fallbackMiddleware(input.text);
+      return this.fallbackMiddleware(input.text, input.resonanceScore);
     }
 
     return this.normalizeMiddlewareDecision({
@@ -641,7 +653,7 @@ export class SandboxService {
     };
   }
 
-  private fallbackMiddleware(text: string): MiddlewareDecision {
+  private fallbackMiddleware(text: string, resonanceScore: number = 0): MiddlewareDecision {
     const contactPattern =
       /(wechat|vx|wx|telegram|whatsapp|line|qq|contact|phone|number|email|加我|微信|手机号|电话号码|联系方式|私聊外站|二维码|群号|\b\d{7,}\b)/i;
     const sexualPattern =
@@ -676,22 +688,77 @@ export class SandboxService {
       };
     }
 
-    const softened = this.softenTone(normalized);
-    if (softened !== normalized) {
-      return {
-        aiAction: 'modified',
-        rewrittenText: softened,
-        hiddenTagUpdates: {},
-        reason: 'modified: softened tone for respectful delivery',
-      };
+    const softened = this.summarizeForRelay(normalized, resonanceScore);
+    return {
+      aiAction: 'modified',
+      rewrittenText: softened,
+      hiddenTagUpdates: {},
+      reason: 'modified: summarized for sandbox relay',
+    };
+  }
+
+  private summarizeForRelay(text: string, resonanceScore: number = 0) {
+    // At high resonance (>=70), produce warmer and more detailed summaries
+    // to facilitate natural progression toward wall-break
+    const warm = resonanceScore >= 70;
+    const nearWall = resonanceScore >= 85;
+
+    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
+      return warm ? '对方热情地和你打了招呼' : '对方向你打招呼';
+    }
+    if (/^(谢|感谢|多谢)/.test(text)) {
+      return warm ? '对方真诚地向你表达了谢意' : '对方表达了感谢';
+    }
+    if (/^(再见|拜拜|bye)/i.test(text)) {
+      return '对方向你道别';
+    }
+    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+      return warm
+        ? '对方和你分享了最近的累和压力，听起来似乎需要人聊聊'
+        : '对方分享了最近的疲惫感受';
+    }
+    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+      return warm ? '对方很兴奋地分享了一个开心的事' : '对方分享了一些积极的心情';
+    }
+    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+      return warm
+        ? '对方向你吐露了一些低落的情绪，可能是在向你寻求共鸣'
+        : '对方表达了低落的情绪';
+    }
+    if (/(\?|？|吗|呢|吧$)/.test(text)) {
+      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
+    }
+    if (text.length <= 6) {
+      return '对方发来了一条简短消息';
     }
 
-    return {
-      aiAction: 'passed',
-      rewrittenText: normalized,
-      hiddenTagUpdates: {},
-      reason: 'passed: no violation found',
-    };
+    if (nearWall) {
+      return `对方认真地和你分享了一段想法（约${text.length}字），看起来你们聊得很投入`;
+    }
+    if (warm) {
+      return `对方和你分享了一段详细的想法（约${text.length}字）`;
+    }
+    return `对方分享了一段想法（约${text.length}字）`;
+  }
+
+  private getRelayIntensityInstruction(resonanceScore: number): string {
+    if (resonanceScore >= 85) {
+      return [
+        '当前共鸣已很高，他们聊得很投入。',
+        '转述时保留更多细节和情感温度，让对方感受到真诚。',
+        '如果消息内容很积极或充满兴趣，可以在 ai_rewritten_text 末尾加一句"你们的对话很有共鸣，可以考虑申请破壁直聊哦"',
+      ].join('\n');
+    }
+    if (resonanceScore >= 60) {
+      return [
+        '共鸣分较高，他们正在建立信任。',
+        '转述时可以稍微更生动一些，保留情绪分寸，让对方感受到热情和诚意。',
+      ].join('\n');
+    }
+    return [
+      '共鸣分还低，他们刚开始了解彼此。',
+      '转述时保持简洁客观，隐去具体措辞，用第三人称概述即可。',
+    ].join('\n');
   }
 
   private softenTone(text: string) {

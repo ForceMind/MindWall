@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConversationDomainModule } from './conversation/conversation-domain.module';
 import { IdentityDomainModule } from './identity/identity-domain.module';
 import { MatchingDomainModule } from './matching/matching-domain.module';

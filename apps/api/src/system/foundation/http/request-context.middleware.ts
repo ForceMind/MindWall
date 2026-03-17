@@ -1,4 +1,4 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 
 export interface RequestWithContext extends Request {

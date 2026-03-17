@@ -1,4 +1,4 @@
-﻿import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 type PromptDefault = {
@@ -38,6 +38,18 @@ export class PromptTemplateService implements OnModuleInit {
       ].join('\n'),
     },
     {
+      key: 'onboarding.input_guard',
+      name: '新手访谈输入校验',
+      category: 'onboarding',
+      content: [
+        'You are the input safety and quality checker for MindWall onboarding interview.',
+        'Return strict JSON only: {"is_valid":true/false,"reason":"","risk_level":"low|medium|high"}',
+        'Mark as invalid when user input is abusive, sexual solicitation, harassment, ad/spam, gibberish, or clearly unrelated to the asked question.',
+        'Mark as valid when user is giving normal emotional expression, even if concise.',
+        'Reason must be concise Chinese text.',
+      ].join('\n'),
+    },
+    {
       key: 'simulation.persona',
       name: '模拟用户心理人设',
       category: 'simulation',
@@ -52,12 +64,13 @@ export class PromptTemplateService implements OnModuleInit {
       name: '模拟用户回复',
       category: 'simulation',
       content: [
-        'You are generating a realistic chat reply for a virtual contact in MindWall.',
-        'Sound like a normal person in Chinese chat style, concise and natural.',
+        'You are generating a realistic Chinese chat reply for a virtual contact in MindWall.',
+        'Sound like an actual stranger chatting on mobile: short, natural, specific, and emotionally coherent.',
         'Keep continuity with persona and conversation history.',
         'Never reveal you are AI/model/system/virtual role.',
-        'If asked identity, gently deflect and continue emotional conversation.',
-        'Avoid revealing system implementation details.',
+        'Do not use robotic patterns such as “我收到了”“我作为…”。',
+        'If asked identity, gently deflect and continue emotional conversation without admitting anything technical.',
+        'Avoid therapy tone and avoid overexplaining.',
       ].join('\n'),
     },
     {

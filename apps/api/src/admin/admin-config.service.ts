@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { ServerLogService } from '../telemetry/server-log.service';

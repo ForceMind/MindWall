@@ -22,4 +22,3 @@ Thumbs.db
 # --- Runtime data (never deploy from local machine) ---
 apps/api/config/runtime-config.json
 apps/api/logs/
-Minimal-Server-Deploy/

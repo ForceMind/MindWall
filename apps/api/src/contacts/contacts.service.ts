@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { MatchStatus, UserTagType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -33,7 +33,7 @@ export class ContactsService {
     if (!city) {
       return {
         city_scope: null,
-        candidates: this.buildAiCandidates(me.tags),
+        candidates: this.buildAiCandidates(me.tags, null),
       };
     }
 
@@ -143,7 +143,7 @@ export class ContactsService {
 
     return {
       city_scope: city,
-      candidates: [...candidates, ...this.buildAiCandidates(me.tags)],
+      candidates: [...candidates, ...this.buildAiCandidates(me.tags, city)],
     };
   }
 
@@ -335,30 +335,55 @@ export class ContactsService {
     return Math.max(0, Math.min(100, Math.round(overlap * 100 - riskPenalty)));
   }
 
-  private buildAiCandidates(selfTags: Array<{ tag_name: string; weight: number }>) {
+  private buildAiCandidates(
+    selfTags: Array<{ tag_name: string; weight: number }>,
+    city?: string | null,
+  ) {
     const seedTags = selfTags
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 2)
       .map((item) => item.tag_name);
 
+    // Generate city-flavored names when city is available
+    const cityNameMap: Record<string, [string, string, string]> = {
+      '北京': ['胡同漫步', '故宫夜话', '后海清风'],
+      '上海': ['外滩来信', '弄堂闲话', '梧桐路口'],
+      '广州': ['骑楼晚风', '茶楼小记', '珠江夜色'],
+      '深圳': ['南山信号', '梅林时差', '湾区晚安'],
+      '成都': ['火锅电台', '太古漫游', '锦里日常'],
+      '杭州': ['西湖晨跑', '拱墅夜话', '钱塘信箱'],
+      '武汉': ['江城热干', '东湖散步', '黄鹤夜话'],
+      '南京': ['鸡鸣信箱', '玄武散步', '秦淮夜话'],
+      '重庆': ['山城爬坡', '洪崖洞灯', '两江夜话'],
+      '长沙': ['橘洲电台', '岳麓散步', '湘江夜话'],
+    };
+
+    const cityNames = (city && cityNameMap[city]) || null;
+
     const personas = [
       {
         id: 'ai_reflective',
-        name: '夏雾来信',
+        name: cityNames?.[0] || '夏雾来信',
         tags: ['情绪共情', '慢节奏交流', ...seedTags],
-        summary: '偏向接住情绪、循序推进关系。',
+        summary: city
+          ? `同在${city}，偏向接住情绪、循序推进关系。`
+          : '偏向接住情绪、循序推进关系。',
       },
       {
         id: 'ai_boundary',
-        name: '林间坐标',
+        name: cityNames?.[1] || '林间坐标',
         tags: ['边界感', '关系观察', ...seedTags],
-        summary: '偏向清晰边界、稳定沟通。',
+        summary: city
+          ? `同在${city}，偏向清晰边界、稳定沟通。`
+          : '偏向清晰边界、稳定沟通。',
       },
       {
         id: 'ai_warm',
-        name: '夜航电台',
+        name: cityNames?.[2] || '夜航电台',
         tags: ['温柔表达', '安全陪伴', ...seedTags],
-        summary: '偏向温和聊天与日常安抚。',
+        summary: city
+          ? `同在${city}，偏向温和聊天与日常安抚。`
+          : '偏向温和聊天与日常安抚。',
       },
     ];
 

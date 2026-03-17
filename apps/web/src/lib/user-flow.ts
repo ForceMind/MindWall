@@ -1,4 +1,4 @@
-﻿import type { ViewerPayload } from './user-api';
+import type { ViewerPayload } from './user-api';
 
 export function resolvePostAuthRoute(viewer: ViewerPayload | null) {
   if (!viewer) {

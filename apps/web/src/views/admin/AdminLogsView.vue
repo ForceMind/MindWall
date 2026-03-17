@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import AdminShell from '@/components/AdminShell.vue';
 import { fetchAdminLogs } from '@/lib/admin-api';

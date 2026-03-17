@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import AdminShell from '@/components/AdminShell.vue';
 import { fetchAdminAiRecords } from '@/lib/admin-api';

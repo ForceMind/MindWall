@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ContactsModule } from '../../../contacts/contacts.module';
 import { MatchEngineModule } from '../../../match-engine/match-engine.module';
 

@@ -1,4 +1,4 @@
-﻿const USER_TOKEN_KEY = 'mindwall.user.session_token';
+const USER_TOKEN_KEY = 'mindwall.user.session_token';
 const ADMIN_TOKEN_KEY = 'mindwall.admin.session_token';
 
 export function loadUserToken() {

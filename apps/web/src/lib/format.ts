@@ -1,4 +1,4 @@
-﻿export function statusText(status: string) {
+export function statusText(status: string) {
   switch (status) {
     case 'onboarding':
       return '新手引导中';

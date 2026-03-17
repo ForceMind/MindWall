@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import AdminShell from '@/components/AdminShell.vue';
 import { fetchAdminConfig, saveAdminConfig, testAdminConfig } from '@/lib/admin-api';

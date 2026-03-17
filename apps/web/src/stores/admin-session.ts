@@ -1,4 +1,4 @@
-﻿import { computed, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { adminLogout, fetchAdminSession } from '@/lib/admin-api';
 import { clearAdminToken, loadAdminToken, saveAdminToken } from '@/lib/storage';

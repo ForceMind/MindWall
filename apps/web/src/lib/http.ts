@@ -1,4 +1,4 @@
-﻿import { ApiError, mapBackendMessage, parseErrorPayload } from './api-error';
+import { ApiError, mapBackendMessage, parseErrorPayload } from './api-error';
 import { appConfig } from './config';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

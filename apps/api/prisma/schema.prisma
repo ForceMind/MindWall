@@ -30,6 +30,12 @@ enum AiAction {
   modified
 }
 
+enum OnboardingSessionStatus {
+  in_progress
+  completed
+  blocked
+}
+
 model User {
   id               String           @id @default(uuid()) @db.Uuid
   auth_provider_id String           @unique
@@ -41,6 +47,7 @@ model User {
   tags             UserTag[]
   ai_logs          AiGenerationLog[]
   interview_records OnboardingInterviewRecord[]
+  interview_sessions OnboardingInterviewSession[]
   matches_a        Match[]          @relation("MatchUserA")
   matches_b        Match[]          @relation("MatchUserB")
   sent_messages    SandboxMessage[] @relation("SentMessages")
@@ -199,4 +206,21 @@ model OnboardingInterviewRecord {
   @@index([user_id, created_at])
   @@index([session_id, created_at])
   @@map("onboarding_interview_records")
+}
+
+model OnboardingInterviewSession {
+  id                    String                  @id @db.Uuid
+  user_id               String                  @db.Uuid
+  status                OnboardingSessionStatus @default(in_progress)
+  answer_count          Int                     @default(0)
+  total_questions       Int                     @default(4)
+  invalid_attempt_count Int                     @default(0)
+  created_at            DateTime                @default(now())
+  updated_at            DateTime                @updatedAt
+  completed_at          DateTime?
+  user                  User                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, status, updated_at])
+  @@index([status, updated_at])
+  @@map("onboarding_interview_sessions")
 }

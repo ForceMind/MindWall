@@ -577,6 +577,41 @@ a {
   color: rgba(100, 116, 139, 0.6);
 }
 
+.bubble.ai-relay {
+  border-left: 3px solid var(--accent-cool);
+  background: linear-gradient(160deg, rgba(59, 170, 133, 0.06), rgba(59, 170, 133, 0.02));
+}
+
+.bubble.ai-relay.me {
+  border-left: none;
+  border-right: 3px solid var(--accent-cool);
+}
+
+.ai-relay-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cool);
+  background: rgba(59, 170, 133, 0.1);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-bottom: 4px;
+}
+
+.original-text {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(100, 116, 139, 0.2);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.original-label {
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.7);
+}
+
 .composer {
   display: flex;
   gap: 10px;

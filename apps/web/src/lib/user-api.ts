@@ -1,4 +1,4 @@
-﻿import { httpRequest } from './http';
+import { httpRequest } from './http';
 
 export interface PublicTag {
   tag_name: string;
@@ -149,6 +149,7 @@ export function startOnboardingSession(token: string) {
     session_id: string;
     assistant_message: string;
     remaining_questions: number;
+    turns?: Array<{ role: string; content: string }>;
   }>('/onboarding/me/session', {
     method: 'POST',
     token,
@@ -169,6 +170,13 @@ export function sendOnboardingMessage(token: string, sessionId: string, message:
         user_id: string;
         public_tags: PublicTag[];
         onboarding_summary: string;
+      }
+    | {
+        status: 'invalid_input';
+        session_id: string;
+        warning: string;
+        invalid_attempts: number;
+        remaining_before_ban: number;
       }
   >(`/onboarding/me/session/${sessionId}/messages`, {
     method: 'POST',

@@ -1,4 +1,4 @@
-﻿import { httpRequest } from './http';
+import { httpRequest } from './http';
 
 export type UserStatus = 'onboarding' | 'active' | 'restricted';
 

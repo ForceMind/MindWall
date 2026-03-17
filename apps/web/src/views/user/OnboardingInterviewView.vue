@@ -1,5 +1,5 @@
-﻿<script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue';
+<script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
 import { startOnboardingSession, sendOnboardingMessage, type PublicTag } from '@/lib/user-api';
@@ -26,6 +26,7 @@ const done = ref(false);
 const summary = ref('');
 const tags = ref<PublicTag[]>([]);
 const chatBoxRef = ref<HTMLElement | null>(null);
+const inputWarning = ref('');
 
 async function bootstrapSession() {
   if (!userStore.token) {
@@ -35,10 +36,19 @@ async function bootstrapSession() {
 
   loading.value = true;
   pageError.value = '';
+  inputWarning.value = '';
   try {
     const payload = await startOnboardingSession(userStore.token);
     sessionId.value = payload.session_id;
-    turns.value = [{ role: 'assistant', text: payload.assistant_message }];
+    // Restore turns from server (supports reconnection)
+    if (payload.turns && payload.turns.length > 0) {
+      turns.value = payload.turns.map((t: { role: string; content: string }) => ({
+        role: t.role as 'assistant' | 'user',
+        text: t.content,
+      }));
+    } else {
+      turns.value = [{ role: 'assistant', text: payload.assistant_message }];
+    }
     done.value = false;
     summary.value = '';
     tags.value = [];
@@ -59,23 +69,36 @@ async function submitAnswer() {
 
   sending.value = true;
   pageError.value = '';
+  inputWarning.value = '';
   turns.value.push({ role: 'user', text: message });
   answer.value = '';
   await nextTick();
   scrollToBottom();
 
   try {
-    const payload = await sendOnboardingMessage(userStore.token, sessionId.value, message);
+    const payload = await sendOnboardingMessage(userStore.token, sessionId.value, message) as Record<string, unknown>;
+
+    if (payload.status === 'invalid_input') {
+      // Remove the last user message since it was rejected
+      turns.value.pop();
+      inputWarning.value = String(payload.warning || '请输入有效内容');
+      if (Number(payload.remaining_before_ban || 99) <= 0) {
+        await userStore.refreshViewer();
+        router.replace('/restricted');
+      }
+      return;
+    }
+
     if (payload.status === 'in_progress') {
-      turns.value.push({ role: 'assistant', text: payload.assistant_message });
+      turns.value.push({ role: 'assistant', text: String(payload.assistant_message) });
       await nextTick();
       scrollToBottom();
       return;
     }
 
     done.value = true;
-    summary.value = payload.onboarding_summary;
-    tags.value = payload.public_tags;
+    summary.value = String(payload.onboarding_summary || '');
+    tags.value = (payload.public_tags || []) as PublicTag[];
     await userStore.refreshViewer();
     noticeStore.show('访谈完成，已生成画像', 'success');
   } catch (error) {
@@ -92,12 +115,25 @@ function scrollToBottom() {
   chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
 }
 
+function handleViewportResize() {
+  scrollToBottom();
+}
+
 function goCityStep() {
   router.push('/onboarding/city');
 }
 
 onMounted(() => {
   bootstrapSession();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', handleViewportResize);
+  }
 });
 </script>
 
@@ -122,6 +158,9 @@ onMounted(() => {
 
         <div v-if="loading" class="bubble system">正在初始化访谈...</div>
         <div v-if="pageError" class="bubble system" style="color: #a13553">{{ pageError }}</div>
+        <div v-if="inputWarning" class="bubble system" style="color: #c44d1a; border-color: rgba(240, 160, 48, 0.4); background: rgba(240, 160, 48, 0.12)">
+          ⚠ {{ inputWarning }}
+        </div>
       </div>
 
       <footer class="panel-body" style="padding-top: 8px">

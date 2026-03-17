@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { AdminPlatformModule } from './admin/admin-platform.module';
 import { OpsPlatformModule } from './ops/ops-platform.module';
 

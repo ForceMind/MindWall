@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { CompanionModule } from '../../../companion/companion.module';
 import { SandboxModule } from '../../../sandbox/sandbox.module';
 

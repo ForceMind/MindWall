@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   Injectable,
   Logger,
@@ -32,7 +32,7 @@ interface SaveCityBody {
 
 type TurnRole = 'assistant' | 'user';
 
-interface InterviewTurn {
+export interface InterviewTurn {
   role: TurnRole;
   content: string;
   createdAt: string;
@@ -63,6 +63,8 @@ export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
   private readonly sessions = new Map<string, OnboardingSession>();
   private readonly totalQuestions = 4;
+  private readonly maxInvalidAttempts = 3;
+  private readonly warnAtAttempt = 2;
   private readonly anonymousPrefix = [
     '雾岛',
     '微澜',
@@ -207,10 +209,48 @@ export class OnboardingService {
   ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!user) {
       throw new NotFoundException('User not found.');
+    }
+    if (user.status === 'restricted') {
+      throw new BadRequestException('你的账号已被限制，无法进行访谈。');
+    }
+
+    // Try to resume an existing in-progress session
+    const existing = await this.prisma.onboardingInterviewSession.findFirst({
+      where: { user_id: userId, status: 'in_progress' },
+      orderBy: { updated_at: 'desc' },
+    });
+    if (existing) {
+      const records = await this.prisma.onboardingInterviewRecord.findMany({
+        where: { session_id: existing.id },
+        orderBy: { turn_index: 'asc' },
+      });
+      const turns: InterviewTurn[] = records.map((r) => ({
+        role: r.role as TurnRole,
+        content: r.content,
+        createdAt: r.created_at.toISOString(),
+      }));
+      const session: OnboardingSession = {
+        sessionId: existing.id,
+        userId,
+        turns,
+        answerCount: existing.answer_count,
+        totalQuestions: existing.total_questions,
+      };
+      this.sessions.set(existing.id, session);
+      const lastAssistant = [...turns].reverse().find((t) => t.role === 'assistant');
+      return {
+        status: 'in_progress',
+        session_id: existing.id,
+        user_id: userId,
+        city: body.city?.trim() || null,
+        assistant_message: lastAssistant?.content || '让我们继续访谈吧。',
+        remaining_questions: existing.total_questions - existing.answer_count,
+        turns,
+      };
     }
 
     await this.prisma.user.update({
@@ -259,6 +299,24 @@ export class OnboardingService {
       },
     });
 
+    // Mark any old in-progress sessions as completed
+    await this.prisma.onboardingInterviewSession.updateMany({
+      where: { user_id: userId, status: 'in_progress' },
+      data: { status: 'completed', completed_at: new Date() },
+    });
+
+    // Create persistent session record
+    await this.prisma.onboardingInterviewSession.create({
+      data: {
+        id: sessionId,
+        user_id: userId,
+        status: 'in_progress',
+        answer_count: 0,
+        total_questions: this.totalQuestions,
+        invalid_attempt_count: 0,
+      },
+    });
+
     const firstQuestion = await this.generateQuestion([], 0, userId);
     const session: OnboardingSession = {
       sessionId,
@@ -283,6 +341,7 @@ export class OnboardingService {
       city,
       assistant_message: firstQuestion,
       remaining_questions: this.totalQuestions,
+      turns: session.turns,
     };
   }
 
@@ -296,8 +355,58 @@ export class OnboardingService {
       throw new BadRequestException('message is required.');
     }
 
+    // AI input validation
+    const validation = await this.validateUserInput(message, session.userId);
+    if (!validation.valid) {
+      // Increment invalid attempt count
+      const dbSession = await this.prisma.onboardingInterviewSession.findUnique({
+        where: { id: sessionId },
+      });
+      const attempts = (dbSession?.invalid_attempt_count || 0) + 1;
+      await this.prisma.onboardingInterviewSession.update({
+        where: { id: sessionId },
+        data: { invalid_attempt_count: attempts },
+      });
+
+      if (attempts >= this.maxInvalidAttempts) {
+        // Ban the user
+        await this.prisma.user.update({
+          where: { id: session.userId },
+          data: { status: 'restricted' },
+        });
+        await this.prisma.onboardingInterviewSession.update({
+          where: { id: sessionId },
+          data: { status: 'blocked' },
+        });
+        this.sessions.delete(sessionId);
+        await this.serverLogService.warn('onboarding.input.banned', 'user banned for invalid input', {
+          user_id: session.userId,
+          attempts,
+        });
+        throw new BadRequestException('由于多次输入无关内容，你的账号已被限制。');
+      }
+
+      const warning = attempts >= this.warnAtAttempt
+        ? '请输入与访谈相关的真实回答。再输入无关内容将导致账号被限制。'
+        : '你的回答似乎与访谈无关，请认真回答问题。';
+
+      return {
+        status: 'invalid_input',
+        session_id: sessionId,
+        warning,
+        invalid_attempts: attempts,
+        remaining_before_ban: this.maxInvalidAttempts - attempts,
+      };
+    }
+
     await this.appendTurn(session, 'user', message);
     session.answerCount += 1;
+
+    // Sync answer count to DB
+    await this.prisma.onboardingInterviewSession.update({
+      where: { id: sessionId },
+      data: { answer_count: session.answerCount },
+    });
 
     if (session.answerCount < session.totalQuestions) {
       const nextQuestion = await this.generateQuestion(
@@ -317,6 +426,12 @@ export class OnboardingService {
 
     const extracted = await this.extractTags(session.turns, session.userId);
     await this.persistTags(session.userId, extracted);
+
+    // Mark session completed in DB
+    await this.prisma.onboardingInterviewSession.update({
+      where: { id: sessionId },
+      data: { status: 'completed', completed_at: new Date() },
+    });
     this.sessions.delete(sessionId);
 
     const publicTags = await this.prisma.userTag.findMany({
@@ -340,6 +455,58 @@ export class OnboardingService {
       public_tags: publicTags,
       onboarding_summary: extracted.onboarding_summary,
     };
+  }
+
+  private async validateUserInput(
+    message: string,
+    userId: string,
+  ): Promise<{ valid: boolean }> {
+    if (!message || message.length < 2) {
+      return { valid: false };
+    }
+    // Basic heuristic: pure nonsense, random chars, too short
+    const stripped = message.replace(/[\s\p{P}\p{S}]+/gu, '');
+    if (stripped.length < 2) {
+      return { valid: false };
+    }
+
+    const aiConfig = await this.adminConfigService.getAiConfig();
+    const apiKey = aiConfig.openaiApiKey;
+    if (!apiKey) {
+      // Without AI, apply simple heuristics only
+      return { valid: stripped.length >= 4 };
+    }
+
+    const prompt = [
+      '你是 MindWall 平台的内容审核员。',
+      '判断用户在心理访谈中输入的回答是否是正常、有意义的内容。',
+      '正常回答应该是对心理/情感问题的认真回应，可以是简短但真诚的。',
+      '以下情况判定为无效：',
+      '- 完全无意义的乱码或随机字符（如"asdfghjk"、"111111"、"啊啊啊"）',
+      '- 与心理访谈完全无关的垃圾内容（如广告、链接、推广）',
+      '- 侮辱性或攻击性内容',
+      '- 明显的敷衍回答（如只回"不知道"、"没有"、"随便"）',
+      '',
+      '注意：简短但真诚的回答是有效的，比如"我觉得很累"、"不太想说"。',
+      '',
+      '返回严格JSON：{"valid": true} 或 {"valid": false}',
+      '',
+      `用户输入: ${message}`,
+    ].join('\n');
+
+    const data = await this.callOpenAiJson<{ valid?: boolean }>(prompt, {
+      userId,
+      feature: 'onboarding.input_validation',
+      promptKey: 'onboarding.input_validation',
+      temperature: 0.1,
+    });
+
+    if (data === null) {
+      // AI unavailable, fallback to accepting
+      return { valid: stripped.length >= 4 };
+    }
+
+    return { valid: data.valid !== false };
   }
 
   private async appendTurn(
@@ -481,6 +648,9 @@ export class OnboardingService {
       '- hidden traits must include harassment_tendency',
       '- public tags should be emotionally meaningful, not generic hobbies',
       '- onboarding_summary should be one Chinese sentence, within 50 Chinese characters when possible',
+      '- onboarding_summary MUST be in Chinese only, absolutely no English words',
+      '- All tag_name values MUST be in Chinese',
+      '- All ai_justification values MUST be in Chinese',
     ].join('\n');
     const promptTemplate = await this.promptTemplateService.getPrompt(
       'onboarding.tag_extraction',
@@ -618,12 +788,16 @@ export class OnboardingService {
       });
     }
 
+    const rawSummary = input.onboarding_summary?.trim() || fallback.onboarding_summary;
+    // If summary contains English, use fallback
+    const hasEnglish = /[a-zA-Z]{3,}/.test(rawSummary);
+    const onboarding_summary = hasEnglish ? fallback.onboarding_summary : rawSummary;
+
     return {
       public_tags: publicTags.length > 0 ? publicTags : fallback.public_tags,
       hidden_system_traits:
         hiddenTags.length > 0 ? hiddenTags : fallback.hidden_system_traits,
-      onboarding_summary:
-        input.onboarding_summary?.trim() || fallback.onboarding_summary,
+      onboarding_summary,
     };
   }
 

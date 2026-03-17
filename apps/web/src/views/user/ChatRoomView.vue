@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
@@ -12,9 +12,11 @@ import { useUserSessionStore } from '@/stores/user-session';
 interface UiMessage {
   id: string;
   text: string;
+  originalText?: string;
   mine: boolean;
-  kind: 'text' | 'system';
+  kind: 'text' | 'system' | 'ai-relay';
   time: string;
+  aiAction?: string;
 }
 
 interface WallStatus {
@@ -38,6 +40,7 @@ const inputText = ref('');
 const title = ref('会话');
 const messages = ref<UiMessage[]>([]);
 const listRef = ref<HTMLElement | null>(null);
+const userScrolledUp = ref(false);
 const wall = ref<WallStatus>({
   status: 'pending',
   resonanceScore: 0,
@@ -99,6 +102,17 @@ function resetState() {
   };
 }
 
+function isNearBottom() {
+  if (!listRef.value) return true;
+  const el = listRef.value;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+}
+
+function scrollToBottomIfNeeded() {
+  if (!listRef.value || userScrolledUp.value) return;
+  listRef.value.scrollTop = listRef.value.scrollHeight;
+}
+
 function pushMessage(item: UiMessage) {
   if (messageIdSet.has(item.id)) {
     return;
@@ -106,9 +120,7 @@ function pushMessage(item: UiMessage) {
   messageIdSet.add(item.id);
   messages.value.push(item);
   nextTick(() => {
-    if (listRef.value) {
-      listRef.value.scrollTop = listRef.value.scrollHeight;
-    }
+    scrollToBottomIfNeeded();
   });
 }
 
@@ -144,12 +156,28 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
     };
   }
 
+  const isMine = item.sender_id === myUserId;
+  const isRewritten = item.ai_action === 'modified' || (item.ai_rewritten_text !== item.original_text);
+
+  if (isMine) {
+    return {
+      id: item.message_id,
+      text: item.ai_rewritten_text,
+      originalText: isRewritten ? item.original_text : undefined,
+      mine: true,
+      kind: isRewritten ? 'ai-relay' : 'text',
+      time: item.created_at,
+      aiAction: item.ai_action,
+    };
+  }
+
   return {
     id: item.message_id,
     text: item.ai_rewritten_text,
-    mine: item.sender_id === myUserId,
-    kind: 'text',
+    mine: false,
+    kind: isRewritten ? 'ai-relay' : 'text',
     time: item.created_at,
+    aiAction: item.ai_action,
   };
 }
 
@@ -160,9 +188,11 @@ function saveAiHistory() {
   const serializable = messages.value.map((item) => ({
     id: item.id,
     text: item.text,
+    originalText: item.originalText,
     mine: item.mine,
     kind: item.kind,
     time: item.time,
+    aiAction: item.aiAction,
   }));
   localStorage.setItem(aiHistoryKey(), JSON.stringify(serializable));
 }
@@ -220,23 +250,32 @@ function handleSocketEvent(event: SandboxInbound) {
   }
 
   if (type === 'message_delivered') {
+    const originalText = String(event.original_text || '');
+    const rewrittenText = String(event.text || '');
+    const aiAction = String(event.ai_action || 'passed');
+    const isRewritten = aiAction === 'modified' || (originalText && rewrittenText !== originalText);
     pushMessage({
       id: String(event.message_id || `mine-${Date.now()}`),
-      text: String(event.text || ''),
+      text: rewrittenText,
+      originalText: isRewritten ? originalText : undefined,
       mine: true,
-      kind: 'text',
+      kind: isRewritten ? 'ai-relay' : 'text',
       time: String(event.created_at || new Date().toISOString()),
+      aiAction,
     });
     return;
   }
 
   if (type === 'sandbox_message' || type === 'direct_message') {
+    const aiAction = String(event.ai_action || 'passed');
+    const isAiRelay = type === 'sandbox_message' && (aiAction === 'modified' || aiAction === 'passed');
     pushMessage({
       id: String(event.message_id || `peer-${Date.now()}`),
       text: String(event.text || ''),
       mine: false,
-      kind: 'text',
+      kind: (type === 'sandbox_message') ? 'ai-relay' : 'text',
       time: String(event.created_at || new Date().toISOString()),
+      aiAction: isAiRelay ? aiAction : undefined,
     });
     return;
   }
@@ -418,8 +457,32 @@ async function submitWallDecision(accept: boolean) {
   noticeStore.show(accept ? '已提交同意破壁' : '已提交暂不破壁', 'info');
 }
 
+function handleListScroll() {
+  userScrolledUp.value = !isNearBottom();
+}
+
+function handleViewportResize() {
+  if (!userScrolledUp.value) {
+    nextTick(() => {
+      if (listRef.value) {
+        listRef.value.scrollTop = listRef.value.scrollHeight;
+      }
+    });
+  }
+}
+
 onMounted(() => {
   initialize();
+  // Listen to scroll to detect if user manually scrolled up
+  nextTick(() => {
+    if (listRef.value) {
+      listRef.value.addEventListener('scroll', handleListScroll, { passive: true });
+    }
+  });
+  // Mobile keyboard auto-scroll via visualViewport API
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+  }
 });
 
 watch(
@@ -434,6 +497,12 @@ onBeforeUnmount(() => {
   if (!isMatchChat.value) {
     saveAiHistory();
   }
+  if (listRef.value) {
+    listRef.value.removeEventListener('scroll', handleListScroll);
+  }
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', handleViewportResize);
+  }
 });
 </script>
 
@@ -444,7 +513,7 @@ onBeforeUnmount(() => {
         <div class="row" style="justify-content: space-between">
           <span class="badge badge-muted">共鸣值 {{ wall.resonanceScore }}</span>
           <span v-if="isMatchChat" class="badge" :class="wall.wallBroken ? 'badge-success' : 'badge-accent'">
-            {{ wall.wallBroken ? '已破壁直聊' : '沙盒改写中' }}
+            {{ wall.wallBroken ? '已破壁直聊' : 'AI 转述中' }}
           </span>
         </div>
 
@@ -463,9 +532,13 @@ onBeforeUnmount(() => {
           v-for="item in messages"
           :key="item.id"
           class="bubble"
-          :class="[item.mine ? 'me' : '', item.kind === 'system' ? 'system' : '']"
+          :class="[item.mine ? 'me' : '', item.kind === 'system' ? 'system' : '', item.kind === 'ai-relay' ? 'ai-relay' : '']"
         >
+          <div v-if="item.kind === 'ai-relay' && !item.mine" class="ai-relay-badge">AI 转述</div>
           <div>{{ item.text }}</div>
+          <div v-if="item.mine && item.originalText" class="original-text">
+            <span class="original-label">你的原文：</span>{{ item.originalText }}
+          </div>
           <div class="bubble-meta">{{ formatTime(item.time) }}</div>
         </div>
       </div>

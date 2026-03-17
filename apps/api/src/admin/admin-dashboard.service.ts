@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { UserStatus } from '@prisma/client';
 import { AiUsageService } from '../telemetry/ai-usage.service';
 import { PromptTemplateService } from '../telemetry/prompt-template.service';

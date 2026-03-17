@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TelemetryModule } from '../../../telemetry/telemetry.module';
 import { GlobalHttpExceptionFilter } from './global-http-exception.filter';
 import { HttpLoggingInterceptor } from './http-logging.interceptor';

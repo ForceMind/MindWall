@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHistory } from 'vue-router';
 import { useAdminSessionStore } from '@/stores/admin-session';
 import { useUserSessionStore } from '@/stores/user-session';
 
