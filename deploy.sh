@@ -789,8 +789,21 @@ check_ports() {
 install_and_build() {
   log_step "[7/8] 安装依赖、迁移数据库、构建"
 
+  # 确保有 swap 空间，降低构建期间 OOM 风险
+  if have_cmd swapon && [[ "$(swapon --show --noheadings 2>/dev/null | wc -l)" -eq 0 ]]; then
+    log_warn "未检测到 swap 空间。构建可能占用大量内存。"
+    if [[ ! -f /swapfile ]] && have_cmd fallocate; then
+      log_info "自动创建 1GB swap..."
+      as_root fallocate -l 1G /swapfile
+      as_root chmod 600 /swapfile
+      as_root mkswap /swapfile
+      as_root swapon /swapfile
+      log_info "swap 已启用（临时）"
+    fi
+  fi
+
   # 限制 Node 构建内存，防止 OOM 影响服务器其他应用
-  export NODE_OPTIONS="--max-old-space-size=512"
+  export NODE_OPTIONS="--max-old-space-size=384"
 
   npm_install_dir "$API_DIR"
   (cd "$API_DIR" && npm_exec run prisma:generate)

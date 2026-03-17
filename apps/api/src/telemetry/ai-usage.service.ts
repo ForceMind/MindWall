@@ -64,7 +64,10 @@ export class AiUsageService {
   }
 
   async getUsageOverview() {
-    const [aggregate, totalRecords] = await Promise.all([
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [aggregate, totalRecords, todayAggregate, todayRecords] = await Promise.all([
       this.prisma.aiGenerationLog.aggregate({
         _sum: {
           input_tokens: true,
@@ -74,14 +77,27 @@ export class AiUsageService {
         },
       }),
       this.prisma.aiGenerationLog.count(),
+      this.prisma.aiGenerationLog.aggregate({
+        where: { created_at: { gte: todayStart } },
+        _sum: {
+          total_tokens: true,
+          estimated_cost_usd: true,
+        },
+      }),
+      this.prisma.aiGenerationLog.count({
+        where: { created_at: { gte: todayStart } },
+      }),
     ]);
 
     return {
-      total_records: totalRecords,
-      input_tokens: aggregate._sum.input_tokens || 0,
-      output_tokens: aggregate._sum.output_tokens || 0,
+      total_calls: totalRecords,
+      total_input_tokens: aggregate._sum.input_tokens || 0,
+      total_output_tokens: aggregate._sum.output_tokens || 0,
       total_tokens: aggregate._sum.total_tokens || 0,
-      estimated_cost_usd: Number(aggregate._sum.estimated_cost_usd || 0),
+      total_estimated_cost_usd: Number(aggregate._sum.estimated_cost_usd || 0),
+      today_calls: todayRecords,
+      today_tokens: todayAggregate._sum.total_tokens || 0,
+      today_estimated_cost_usd: Number(todayAggregate._sum.estimated_cost_usd || 0),
     };
   }
 
