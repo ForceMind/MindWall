@@ -35,6 +35,45 @@ const profileName = computed(
 );
 const profileAvatar = computed(() => userStore.viewer?.profile?.anonymous_avatar || '');
 
+const AI_PERSONAS: Record<string, { name: string; disclosure: string }> = {
+  ai_psychologist: { name: '心灵访谈师', disclosure: 'AI 心灵陪伴' },
+  ai_reflective: { name: '夏雾来信', disclosure: '匹配对象' },
+  ai_boundary: { name: '林间坐标', disclosure: '匹配对象' },
+  ai_warm: { name: '夜航电台', disclosure: '匹配对象' },
+};
+
+function getAiSessionsFromLocal(): ContactSession[] {
+  const sessions: ContactSession[] = [];
+  for (const key of Object.keys(AI_PERSONAS)) {
+    const storageKey = `mindwall.ai.chat.${key}`;
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) continue;
+    try {
+      const msgs = JSON.parse(raw);
+      if (!Array.isArray(msgs) || msgs.length === 0) continue;
+      const last = msgs[msgs.length - 1];
+      const info = AI_PERSONAS[key];
+      sessions.push({
+        match_id: key,
+        counterpart_user_id: key,
+        candidate_type: 'ai',
+        disclosure: info.disclosure,
+        name: info.name,
+        avatar: null,
+        city: null,
+        status: 'wall_broken',
+        resonance_score: 0,
+        ai_match_reason: null,
+        updated_at: last.time || new Date().toISOString(),
+        public_tags: [],
+      });
+    } catch {
+      // skip corrupt data
+    }
+  }
+  return sessions;
+}
+
 async function loadData(isRefresh = false) {
   if (!userStore.token) {
     router.replace('/login');
@@ -54,7 +93,7 @@ async function loadData(isRefresh = false) {
       fetchCandidates(userStore.token),
     ]);
 
-    contacts.value = contactPayload.contacts;
+    contacts.value = [...getAiSessionsFromLocal(), ...contactPayload.contacts];
     candidates.value = candidatePayload.candidates;
     cityScope.value = candidatePayload.city_scope;
 
@@ -70,6 +109,11 @@ async function loadData(isRefresh = false) {
 }
 
 function openMatch(matchId: string) {
+  // AI companion sessions use their persona id as match_id
+  if (AI_PERSONAS[matchId]) {
+    router.push(`/chat/ai/${matchId}`);
+    return;
+  }
   router.push(`/chat/match/${matchId}`);
 }
 
@@ -179,8 +223,8 @@ onMounted(() => {
                     </div>
                   </div>
                 </div>
-                <span class="badge" :class="statusBadgeClass(item.status)">{{
-                  statusText(item.status)
+                <span class="badge" :class="item.candidate_type === 'ai' ? 'badge-muted' : statusBadgeClass(item.status)">{{
+                  item.candidate_type === 'ai' ? item.disclosure : statusText(item.status)
                 }}</span>
               </div>
 

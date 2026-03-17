@@ -63,6 +63,15 @@ export class CompanionService {
       emotion: '柔和鼓励',
       conflict: '降低张力，逐步收敛',
     },
+    {
+      id: 'ai_psychologist',
+      name: '心灵访谈师',
+      rhythm: '沉稳节奏、深度倾听',
+      attachment: '专业支持型',
+      boundary: '温暖但有边界',
+      emotion: '深度共情、不说教',
+      conflict: '多角度提问、逐步深化',
+    },
   ];
 
   constructor(
@@ -111,8 +120,9 @@ export class CompanionService {
     }
 
     const persona = this.resolvePersona(body.companion_id, userId, profile?.city || null);
+    const includeInterview = persona.id === 'ai_psychologist';
 
-    const dynamicCtx = await this.buildDynamicPersonaContext(userId);
+    const dynamicCtx = await this.buildDynamicPersonaContext(userId, includeInterview);
 
     const personaPromptFallback = [
       'You design realistic companion personas for anonymous social chat.',
@@ -295,17 +305,11 @@ export class CompanionService {
     return '哈哈你想多了，我就一普通人。对了你刚说到哪了？';
   }
 
-  private async buildDynamicPersonaContext(userId: string): Promise<DynamicPersonaContext> {
-    const [profile, records, tags] = await Promise.all([
+  private async buildDynamicPersonaContext(userId: string, includeInterview = false): Promise<DynamicPersonaContext> {
+    const baseQueries: Promise<unknown>[] = [
       this.prisma.userProfile.findUnique({
         where: { user_id: userId },
         select: { city: true },
-      }),
-      this.prisma.onboardingInterviewRecord.findMany({
-        where: { user_id: userId, role: 'user' },
-        orderBy: { created_at: 'asc' },
-        take: 8,
-        select: { content: true },
       }),
       this.prisma.userTag.findMany({
         where: { user_id: userId, type: UserTagType.PUBLIC_VISIBLE },
@@ -313,7 +317,23 @@ export class CompanionService {
         take: 6,
         select: { tag_name: true },
       }),
-    ]);
+    ];
+
+    if (includeInterview) {
+      baseQueries.push(
+        this.prisma.onboardingInterviewRecord.findMany({
+          where: { user_id: userId, role: 'user' },
+          orderBy: { created_at: 'asc' },
+          take: 8,
+          select: { content: true },
+        }),
+      );
+    }
+
+    const results = await Promise.all(baseQueries);
+    const profile = results[0] as { city: string | null } | null;
+    const tags = results[1] as Array<{ tag_name: string }>;
+    const records = (includeInterview ? results[2] : []) as Array<{ content: string }>;
 
     const answers = records.map((r) => r.content.trim()).filter(Boolean);
     const interviewSummary = answers.length > 0
@@ -353,7 +373,11 @@ export class CompanionService {
     }
 
     if (ctx.interviewSummary) {
-      lines.push(`- 用户在访谈中透露的信息（你可以基于这些话题展开聊天、产生共鸣，但不要直接复述）: ${ctx.interviewSummary.slice(0, 400)}`);
+      if (persona.id === 'ai_psychologist') {
+        lines.push(`- 用户在心理访谈中透露的信息（你了解这些内容，但不要主动提起，只在用户主动谈及相关话题时自然回应和延伸）: ${ctx.interviewSummary.slice(0, 400)}`);
+      } else {
+        lines.push(`- 用户的公开标签话题方向（你可以在聊天中自然地往这些方向聊）: ${ctx.tagKeywords.join('、') || '暂无'}`);
+      }
     }
 
     if (ctx.tagKeywords.length > 0) {
@@ -364,6 +388,7 @@ export class CompanionService {
       'ai_reflective': '你性格偏内向，善于倾听，会在对方说完后停顿一下再回应。你更喜欢深入的话题而不是闲聊。',
       'ai_boundary': '你性格比较独立，说话直接但不刻薄。你有自己的生活节奏，不会过分迎合别人。',
       'ai_warm': '你性格开朗随和，喜欢聊天，会主动找话题。你乐于分享生活中的小事。',
+      'ai_psychologist': '你是一个善于倾听的心灵陪伴者。你说话温和但有深度，善于用提问引导对方思考。你不会说教，而是通过共情和好奇心帮助对方探索自己。你的语气像一个值得信任的朋友，而不是冷冰冰的心理医生。',
     };
     lines.push(`- 性格特质: ${personaTraits[persona.id] || personaTraits['ai_warm']}`);
 

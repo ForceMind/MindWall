@@ -23,10 +23,13 @@ const sessionId = ref('');
 const turns = ref<Turn[]>([]);
 const answer = ref('');
 const done = ref(false);
+const analyzing = ref(false);
+const analyzeHint = ref('');
 const summary = ref('');
 const tags = ref<PublicTag[]>([]);
 const chatBoxRef = ref<HTMLElement | null>(null);
 const inputWarning = ref('');
+const turnsCollapsed = ref(false);
 
 async function bootstrapSession() {
   if (!userStore.token) {
@@ -50,6 +53,9 @@ async function bootstrapSession() {
       turns.value = [{ role: 'assistant', text: payload.assistant_message }];
     }
     done.value = false;
+    analyzing.value = false;
+    analyzeHint.value = '';
+    turnsCollapsed.value = false;
     summary.value = '';
     tags.value = [];
     await nextTick();
@@ -95,6 +101,30 @@ async function submitAnswer() {
       scrollToBottom();
       return;
     }
+
+    // Last answer accepted — enter analyzing phase
+    sending.value = false;
+    turnsCollapsed.value = true;
+    analyzing.value = true;
+
+    const hints = [
+      'AI 正在理解你的表达...',
+      '正在生成你的心理画像...',
+      '几乎完成了...',
+    ];
+    analyzeHint.value = hints[0];
+    let hintIndex = 1;
+    const hintTimer = setInterval(() => {
+      if (hintIndex < hints.length) {
+        analyzeHint.value = hints[hintIndex];
+        hintIndex++;
+      }
+    }, 1800);
+
+    // Small delay so user can see the loading animation
+    await new Promise((r) => setTimeout(r, hints.length * 1800 + 500));
+    clearInterval(hintTimer);
+    analyzing.value = false;
 
     done.value = true;
     summary.value = String(payload.onboarding_summary || '');
@@ -152,8 +182,20 @@ onBeforeUnmount(() => {
       </header>
 
       <div ref="chatBoxRef" class="message-list" style="padding: 0 16px 10px">
-        <div v-for="(item, index) in turns" :key="index" class="bubble" :class="item.role === 'user' ? 'me' : ''">
-          <div>{{ item.text }}</div>
+        <template v-if="turnsCollapsed && !done">
+          <div class="bubble system" style="text-align: center; opacity: 0.6">
+            访谈已完成（共 {{ turns.filter(t => t.role === 'user').length }} 轮对话）
+          </div>
+        </template>
+        <template v-else-if="!turnsCollapsed">
+          <div v-for="(item, index) in turns" :key="index" class="bubble" :class="item.role === 'user' ? 'me' : ''">
+            <div>{{ item.text }}</div>
+          </div>
+        </template>
+
+        <div v-if="analyzing" class="bubble system" style="text-align: center">
+          <div style="margin-bottom: 6px">{{ analyzeHint }}</div>
+          <div class="loading-dots"><span>·</span><span>·</span><span>·</span></div>
         </div>
 
         <div v-if="loading" class="bubble system">正在初始化访谈...</div>
@@ -164,7 +206,7 @@ onBeforeUnmount(() => {
       </div>
 
       <footer class="panel-body" style="padding-top: 8px">
-        <div v-if="!done" class="composer">
+        <div v-if="!done && !analyzing" class="composer">
           <textarea
             v-model="answer"
             class="textarea"
@@ -197,3 +239,17 @@ onBeforeUnmount(() => {
     </section>
   </UserShell>
 </template>
+
+<style scoped>
+.loading-dots span {
+  display: inline-block;
+  font-size: 28px;
+  animation: dotPulse 1.2s infinite;
+}
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotPulse {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+</style>

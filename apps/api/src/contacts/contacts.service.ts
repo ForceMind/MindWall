@@ -362,12 +362,20 @@ export class ContactsService {
 
     const personas = [
       {
+        id: 'ai_psychologist',
+        name: '心灵访谈师',
+        tags: ['心理倾听', '深度对话', ...seedTags],
+        summary: '基于你的访谈画像进行深度对话的 AI 陪伴者。',
+        disclosure: 'AI 心灵陪伴',
+      },
+      {
         id: 'ai_reflective',
         name: cityNames?.[0] || '夏雾来信',
         tags: ['情绪共情', '慢节奏交流', ...seedTags],
         summary: city
           ? `同在${city}，偏向接住情绪、循序推进关系。`
           : '偏向接住情绪、循序推进关系。',
+        disclosure: '匹配对象',
       },
       {
         id: 'ai_boundary',
@@ -376,6 +384,7 @@ export class ContactsService {
         summary: city
           ? `同在${city}，偏向清晰边界、稳定沟通。`
           : '偏向清晰边界、稳定沟通。',
+        disclosure: '匹配对象',
       },
       {
         id: 'ai_warm',
@@ -384,6 +393,7 @@ export class ContactsService {
         summary: city
           ? `同在${city}，偏向温和聊天与日常安抚。`
           : '偏向温和聊天与日常安抚。',
+        disclosure: '匹配对象',
       },
     ];
 
@@ -391,11 +401,11 @@ export class ContactsService {
       candidate_id: item.id,
       candidate_type: 'ai',
       is_ai: true,
-      disclosure: '匹配对象',
+      disclosure: item.disclosure,
       city: null,
       avatar: this.buildPersonaAvatar(item.id, item.name),
       name: item.name,
-      score: Math.max(55, 74 - index * 5),
+      score: index === 0 ? 90 : Math.max(55, 74 - (index - 1) * 5),
       has_match: false,
       match_id: null,
       match_status: null,

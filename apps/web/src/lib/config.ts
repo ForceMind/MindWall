@@ -21,7 +21,9 @@ function resolveDefaultApiBaseUrl() {
 
 function resolveDefaultWsBaseUrl(apiBaseUrl: string) {
   if (apiBaseUrl.startsWith('https://') || apiBaseUrl.startsWith('http://')) {
-    return toWsOrigin(apiBaseUrl);
+    // Strip /api suffix — WS endpoint is at /ws/sandbox, not /api/ws/sandbox
+    const origin = apiBaseUrl.replace(/\/api\/?$/, '');
+    return toWsOrigin(origin);
   }
   if (apiBaseUrl.startsWith('/')) {
     if (typeof window !== 'undefined' && window.location?.origin) {
