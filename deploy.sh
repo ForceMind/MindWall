@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # MindWall 部署脚本 v2.0 — 纯独立模式，不改动 Nginx / PM2 / 其他服务
 # 设计原则（学习自 Minimal-Server-Deploy）：
 #   ✓ 不修改 Nginx 配置     ✓ 不干涉 PM2
