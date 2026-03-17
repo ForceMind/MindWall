@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
+# MindWall 更新脚本 — 快速更新（跳过系统依赖安装）
+# 等价于 deploy.sh --skip-system-install，但增加更新前备份提示
 set -euo pipefail
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
 
 SELF="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then
@@ -11,11 +18,7 @@ DEPLOY_SCRIPT="$ROOT_DIR/deploy.sh"
 VERSION_FILE="$ROOT_DIR/VERSION"
 
 project_version() {
-  if [[ -f "$VERSION_FILE" ]]; then
-    tr -d '[:space:]' < "$VERSION_FILE"
-  else
-    echo "未知"
-  fi
+  [[ -f "$VERSION_FILE" ]] && tr -d '[:space:]' < "$VERSION_FILE" || echo "未知"
 }
 
 usage() {
@@ -26,21 +29,19 @@ MindWall 更新脚本
   sudo bash update.sh [选项]
 
 说明:
-  默认执行快速更新（等价于 deploy.sh + --skip-system-install）。
-  如果需要完整重装依赖，请加 --full。
+  默认快速更新（跳过系统依赖安装）。
+  加 --full 执行完整部署（含系统依赖检查）。
 
 选项:
-  --full                  使用完整部署流程（不跳过系统依赖安装）
+  --full                  完整更新（含系统依赖）
   --branch <name>         Git 分支
   --api-port <port>       API 端口
   --web-port <port>       Web 端口
-  --pg-port <port>        PostgreSQL 映射端口（默认 5433）
-  --redis-port <port>     Redis 映射端口（默认 6380）
+  --pg-port <port>        PostgreSQL 映射端口
+  --redis-port <port>     Redis 映射端口
   --public-host <host>    域名或公网 IP
-  --with-nginx            使用 Nginx 代理模式（默认独立模式）
   --skip-git              跳过 Git 拉取
   --no-docker             跳过 Docker
-  --ssl                   尝试配置 HTTPS
   --yes                   非交互模式
   -h, --help              显示帮助
 EOF
@@ -48,10 +49,7 @@ EOF
 
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    -h|--help|help)
-      usage
-      exit 0
-      ;;
+    -h|--help|help) usage; exit 0 ;;
   esac
 fi
 
@@ -70,13 +68,13 @@ for arg in "$@"; do
   FORWARD_ARGS+=("$arg")
 done
 
-echo "MindWall 更新脚本 v$(project_version)"
-echo "目录: $ROOT_DIR"
+echo -e "${CYAN}${BOLD}MindWall 更新脚本${NC} v$(project_version)"
+echo -e "目录: $ROOT_DIR"
 
 if [[ "$FULL_MODE" == "1" ]]; then
-  echo "模式: 完整更新（含系统依赖检查）"
+  echo -e "模式: ${GREEN}完整更新${NC}（含系统依赖检查）"
   exec bash "$DEPLOY_SCRIPT" "${FORWARD_ARGS[@]}"
 else
-  echo "模式: 快速更新（跳过系统依赖安装）"
+  echo -e "模式: ${GREEN}快速更新${NC}（跳过系统依赖安装）"
   exec bash "$DEPLOY_SCRIPT" --skip-system-install "${FORWARD_ARGS[@]}"
 fi
