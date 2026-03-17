@@ -1013,6 +1013,22 @@ MW_PG_PORT=$PG_PORT
 MW_REDIS_PORT=$REDIS_PORT
 MW_PG_PASSWORD=mindwall
 DEOF
+
+  # 处理旧容器遗留：如果旧 Compose 项目名不同（如 infra），
+  # 则同名容器已存在但不属于当前项目，需先移除。
+  local container
+  for container in mindwall-postgres mindwall-redis; do
+    if as_root docker inspect "$container" >/dev/null 2>&1; then
+      local old_project
+      old_project="$(as_root docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$container" 2>/dev/null || true)"
+      if [[ -n "$old_project" && "$old_project" != "mindwall" ]]; then
+        warn "检测到旧项目（$old_project）遗留的容器 $container，正在迁移..."
+        as_root docker stop "$container" 2>/dev/null || true
+        as_root docker rm "$container" 2>/dev/null || true
+      fi
+    fi
+  done
+
   docker_compose up -d postgres redis
 
   echo "  等待 PostgreSQL 就绪..."
