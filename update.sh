@@ -34,6 +34,8 @@ MindWall 更新脚本
   --branch <name>         Git 分支
   --api-port <port>       API 端口
   --web-port <port>       Web 端口
+  --pg-port <port>        PostgreSQL 映射端口（默认 5433）
+  --redis-port <port>     Redis 映射端口（默认 6380）
   --public-host <host>    域名或公网 IP
   --with-nginx            使用 Nginx 代理模式（默认独立模式）
   --skip-git              跳过 Git 拉取

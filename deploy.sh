@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]:-$0}"
@@ -26,8 +26,8 @@ SYSTEMD_WEB_SERVICE_FILE="/etc/systemd/system/mindwall-web.service"
 NGINX_CONF_FILE="/etc/nginx/conf.d/mindwall.conf"
 RUNTIME_WEB_SERVER_FILE="$RUNTIME_DIR/mindwall-web-server.cjs"
 
-MIN_NODE_VERSION="${MIN_NODE_VERSION:-22.14.0}"
-LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-22.14.0}"
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-20.19.0}"
+LOCAL_NODE_VERSION="${LOCAL_NODE_VERSION:-20.19.5}"
 
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 if [[ -z "$CURRENT_BRANCH" || "$CURRENT_BRANCH" == "HEAD" ]]; then
@@ -38,6 +38,8 @@ BRANCH="${BRANCH:-$CURRENT_BRANCH}"
 API_PORT="${API_PORT:-3100}"
 DEFAULT_WEB_PORT="3001"
 WEB_PORT="${WEB_PORT:-$DEFAULT_WEB_PORT}"
+PG_PORT="${PG_PORT:-5433}"
+REDIS_PORT="${REDIS_PORT:-6380}"
 API_PORT_SET=0
 WEB_PORT_SET=0
 SAVED_API_PORT=""
@@ -67,6 +69,8 @@ MindWall 部署脚本（默认独立模式，不影响全局 Nginx）
   --branch <name>           Git 分支（默认：当前分支）
   --api-port <port>         API 本地端口（默认：3100）
   --web-port <port>         Web 对外端口（默认：3001）
+  --pg-port <port>          PostgreSQL 映射端口（默认：5433，避免与系统 PG 冲突）
+  --redis-port <port>       Redis 映射端口（默认：6380，避免与系统 Redis 冲突）
   --public-host <host>      公网域名或公网 IP（用于展示与 CORS）
   --skip-git                跳过 Git 拉取
   --no-docker               跳过 Docker（不启动 PostgreSQL/Redis）
@@ -95,6 +99,16 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "错误: --web-port 缺少参数"; exit 1; }
       WEB_PORT="$2"
       WEB_PORT_SET=1
+      shift 2
+      ;;
+    --pg-port)
+      [[ $# -ge 2 ]] || { echo "错误: --pg-port 缺少参数"; exit 1; }
+      PG_PORT="$2"
+      shift 2
+      ;;
+    --redis-port)
+      [[ $# -ge 2 ]] || { echo "错误: --redis-port 缺少参数"; exit 1; }
+      REDIS_PORT="$2"
       shift 2
       ;;
     --public-host)
@@ -256,6 +270,42 @@ require_root_capability() {
   die "请使用 root 执行，或先安装 sudo。"
 }
 
+stop_service_if_exists() {
+  local service_name="$1"
+  if ! have_command systemctl; then
+    return
+  fi
+  if as_root systemctl list-unit-files | grep -q "^${service_name}\.service"; then
+    as_root systemctl stop "$service_name" || true
+  fi
+}
+
+cleanup_legacy_pm2() {
+  local pm2_bins=()
+  local pm2_homes=("$RUNTIME_DIR/pm2-home" "/root/.pm2")
+
+  if [[ -x "$RUNTIME_DIR/npm-global/bin/pm2" ]]; then
+    pm2_bins+=("$RUNTIME_DIR/npm-global/bin/pm2")
+  fi
+  if have_command pm2; then
+    pm2_bins+=("$(command -v pm2)")
+  fi
+
+  if [[ "${#pm2_bins[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  echo "  清理遗留 PM2 进程（mindwall-api/mindwall-web）..."
+  local pm2_bin pm2_home
+  for pm2_bin in "${pm2_bins[@]}"; do
+    for pm2_home in "${pm2_homes[@]}"; do
+      as_root env PM2_HOME="$pm2_home" "$pm2_bin" delete mindwall-api >/dev/null 2>&1 || true
+      as_root env PM2_HOME="$pm2_home" "$pm2_bin" delete mindwall-web >/dev/null 2>&1 || true
+      as_root env PM2_HOME="$pm2_home" "$pm2_bin" save >/dev/null 2>&1 || true
+    done
+  done
+}
+
 detect_os() {
   if [[ -f /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -319,12 +369,21 @@ docker_compose_available() {
 }
 
 docker_compose() {
+  local env_file="$ROOT_DIR/infra/.env"
   if as_root docker compose version >/dev/null 2>&1; then
-    as_root docker compose -f "$COMPOSE_FILE" "$@"
+    if [[ -f "$env_file" ]]; then
+      as_root docker compose -f "$COMPOSE_FILE" --env-file "$env_file" "$@"
+    else
+      as_root docker compose -f "$COMPOSE_FILE" "$@"
+    fi
     return
   fi
   if have_command docker-compose; then
-    as_root docker-compose -f "$COMPOSE_FILE" "$@"
+    if [[ -f "$env_file" ]]; then
+      as_root docker-compose -f "$COMPOSE_FILE" --env-file "$env_file" "$@"
+    else
+      as_root docker-compose -f "$COMPOSE_FILE" "$@"
+    fi
     return
   fi
   die "Docker Compose 不可用。"
@@ -336,6 +395,15 @@ load_saved_ports() {
   fi
   SAVED_API_PORT="$(grep -E '^API_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
   SAVED_WEB_PORT="$(grep -E '^WEB_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  local saved_pg_port saved_redis_port
+  saved_pg_port="$(grep -E '^PG_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  saved_redis_port="$(grep -E '^REDIS_PORT=' "$RUNTIME_PORTS_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  if [[ -n "$saved_pg_port" ]]; then
+    PG_PORT="$saved_pg_port"
+  fi
+  if [[ -n "$saved_redis_port" ]]; then
+    REDIS_PORT="$saved_redis_port"
+  fi
 
   if [[ "$API_PORT_SET" != "1" ]]; then
     if [[ -n "$SAVED_API_PORT" ]]; then
@@ -361,6 +429,8 @@ save_runtime_ports() {
   cat > "$RUNTIME_PORTS_FILE" <<EOF
 API_PORT=$API_PORT
 WEB_PORT=$WEB_PORT
+PG_PORT=$PG_PORT
+REDIS_PORT=$REDIS_PORT
 EOF
 }
 
@@ -918,10 +988,12 @@ write_api_env() {
   set_env_value "$API_ENV_FILE" "APP_VERSION" "$(project_version)"
 
   if ! grep -qE '^DATABASE_URL=' "$API_ENV_FILE"; then
-    set_env_value "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@127.0.0.1:5432/mindwall?schema=public"
+    set_env_value "$API_ENV_FILE" "DATABASE_URL" "postgresql://mindwall:mindwall@127.0.0.1:${PG_PORT}/mindwall?schema=public"
   else
     # 强制将 localhost 修正为 127.0.0.1，防止 Node 17+ 优先解析 IPv6 ::1 导致无法连接 Docker 映射的 IPv4 端口
-    sed -i 's/@localhost:5432/@127.0.0.1:5432/g' "$API_ENV_FILE" || true
+    sed -i 's/@localhost:5432/@127.0.0.1:'"$PG_PORT"'/g' "$API_ENV_FILE" || true
+    sed -i 's/@localhost:5433/@127.0.0.1:'"$PG_PORT"'/g' "$API_ENV_FILE" || true
+    sed -i 's/@127\.0\.0\.1:5432/@127.0.0.1:'"$PG_PORT"'/g' "$API_ENV_FILE" || true
   fi
 }
 
@@ -934,6 +1006,13 @@ start_infra() {
   [[ -f "$COMPOSE_FILE" ]] || die "找不到 Docker Compose 文件: $COMPOSE_FILE"
 
   echo "[8/12] 启动 PostgreSQL + Redis"
+  # 写入 Docker Compose 环境变量，避免端口冲突
+  local docker_env_file="$ROOT_DIR/infra/.env"
+  cat > "$docker_env_file" <<DEOF
+MW_PG_PORT=$PG_PORT
+MW_REDIS_PORT=$REDIS_PORT
+MW_PG_PASSWORD=mindwall
+DEOF
   docker_compose up -d postgres redis
 
   echo "  等待 PostgreSQL 就绪..."
@@ -949,8 +1028,12 @@ start_infra() {
   done
 
   if (( ok == 0 )); then
-    die "PostgreSQL 启动超时，请检查: docker logs mindwall-postgres"
+    echo "=========== PostgreSQL 容器日志 ==========="
+    as_root docker logs --tail 30 mindwall-postgres 2>&1 || true
+    echo "==========================================="
+    die "PostgreSQL 启动超时，请检查上方的容器日志。"
   fi
+  echo "  PostgreSQL 就绪（端口 $PG_PORT）"
 }
 
 install_deps_migrate_build() {
@@ -1209,6 +1292,25 @@ setup_systemd_web() {
     die "当前系统不支持 systemd，无法自动托管 Web 进程。"
   fi
 
+  # 先停旧服务，避免旧进程抢占端口
+  as_root systemctl stop mindwall-web || true
+  sleep 1
+
+  if port_in_use "$WEB_PORT"; then
+    kill_mindwall_listeners_on_port "$WEB_PORT" "Web"
+  fi
+  if port_in_use "$WEB_PORT"; then
+    if [[ "$WEB_PORT_SET" == "1" ]]; then
+      die "指定的 Web 端口 $WEB_PORT 已被占用（$(port_owner_summary "$WEB_PORT")）。"
+    fi
+    local old_web="$WEB_PORT"
+    WEB_PORT="$(next_free_port "$WEB_PORT")"
+    warn "Web 端口 $old_web 在启动前被占用（$(port_owner_summary "$old_web")），自动切换为 $WEB_PORT"
+    save_runtime_ports
+    write_api_env
+    as_root systemctl restart mindwall-api || true
+  fi
+
   write_runtime_web_server
 
   cat > /tmp/mindwall-web.service <<EOF
@@ -1403,6 +1505,10 @@ print_summary() {
   echo "部署模式: $mode_text"
   echo "API 端口: $API_PORT"
   echo "Web 端口: $WEB_PORT"
+  if [[ "$NO_DOCKER" != "1" ]]; then
+    echo "PG  端口: $PG_PORT（映射到容器内 5432）"
+    echo "Redis端口: $REDIS_PORT（映射到容器内 6379）"
+  fi
   echo "Web 地址: ${schema}://${host}:${WEB_PORT}"
   echo "本地 Node 路径: $NODE_RUNTIME_DIR"
   if [[ "$USE_NGINX" == "1" ]]; then
@@ -1436,6 +1542,7 @@ main() {
   ensure_local_node_runtime
   register_mw_command
   update_git_source
+  cleanup_legacy_pm2
   check_ports
   save_runtime_ports
   write_web_build_env

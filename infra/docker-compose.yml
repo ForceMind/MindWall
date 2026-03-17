@@ -1,3 +1,5 @@
+name: mindwall
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -5,10 +7,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: mindwall
-      POSTGRES_PASSWORD: mindwall
+      POSTGRES_PASSWORD: ${MW_PG_PASSWORD:-mindwall}
       POSTGRES_DB: mindwall
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${MW_PG_PORT:-5433}:5432"
     volumes:
       - mindwall-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -22,9 +24,14 @@ services:
     container_name: mindwall-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${MW_REDIS_PORT:-6380}:6379"
     volumes:
       - mindwall-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   mindwall-postgres-data:
