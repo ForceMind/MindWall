@@ -556,14 +556,14 @@ export class OnboardingService {
       `当前AI的提问是：《${latestQuestion}》`,
       `用户回答是：《${message}》`,
       '',
-      '请判断用户的回答属于哪种情况，并返回严格JSON格式：{"valid": true或false, "is_skip": true或false, "reason": "如果不valid简述原因，否则留空"}',
+      '请判断用户的回答属于哪种情况，并返回严格JSON格式：{"valid": true或false, "is_skip": true或false, "reason": "如果不valid给出回复用户的简短话语，否则留空"}',
       '',
       '【判定规则，按顺序匹配】',
-      '1. 如果是瞎打的乱码（如"asdfgh"、"1111"）、推销广告、人身攻击、或者与访谈和问题完全不沾边的胡言乱语 -> valid: false, is_skip: false (并在reason给出简短原因，以第一人称提示用户语气，比如"你的回答似乎与访谈无关，请认真回答问题。")',
-      '2. 如果用户明确要求跳过、换一题、或者表示看不懂、不知道怎么回答、不想说 -> valid: true, is_skip: true',
-      '3. 如果用户正在回答问题（不管长短，哪怕只是"挺好的"、"没有"、"工作压力大"） -> valid: true, is_skip: false',
+      '1. 如果是纯语气词敷衍（如"哈哈"、"哦"）、瞎打的乱码（如"111"）、人身攻击或调侃（如"你有病"、"你妈"、"傻逼"）、与访谈毫无关系的胡言乱语 -> valid: false, is_skip: false。此时在 reason 里给出一句自然的第一人称回怼或提醒（如："哎呀不要开玩笑啦，认真回答一下好吗？"或"我听不太懂，这好像跟问题无关哦。"）',
+      '2. 如果用户明确要求跳过、换一题、或者表示看不懂、不知道怎么回答、太难了、不想说 -> valid: true, is_skip: true',
+      '3. 如果用户正在提供哪怕非常简短的个人状态、经历、感受（如"输钱"、"累"、"失眠"、"挺好的"） -> valid: true, is_skip: false',
       '',
-      '判断原则：宁可放过，不可错杀。只要不是明显的乱码、垃圾、攻击内容，就算简短或者不那么准确，也一律放行为 valid: true。',
+      '注意：对于用户的真实经历（如"输钱"、"分手"）要判定为 valid: true；但如果是明显的调戏敷衍（如"哈哈"、"你有兵"），必须判定为 valid: false 并给出合理的 reason 提醒！',
     ].join('\n');
 
     const data = await this.callOpenAiJson<{ valid?: boolean; is_skip?: boolean; reason?: string }>(prompt, {
@@ -649,8 +649,7 @@ export class OnboardingService {
       '- For early turns (1-2): focus on positive qualities, strengths, values, good memories, what makes the user unique',
       '- For later turns (3+): gently explore self-perception, boundaries, how the user wants to be understood',
       '- Never start with heavy or painful topics. Approach depth gradually.',
-      '- The next question must continue from the user latest answer if provided, and not abruptly restart a new topic',
-      '- Mention one concrete clue from latest user answer when possible (UNLESS the user just skipped)',
+      '- Talk like a real friend or gentle counselor. Be natural and conversational.',
       '- Every turn must switch to a different focus from previous turns',
       '- Never repeat any previous question in wording or intent',
     ].join('\n');
@@ -663,12 +662,13 @@ export class OnboardingService {
       '- Ask one question only',
       isSkipAction 
         ? '- The user just skipped or did not understand the previous question. You MUST generate a completely DIFFERENT, easier question from a new angle. DO NOT quote or mention that they asked to skip.'
-        : '- Must continue naturally from latest user answer if provided',
+        : '- You must sound like a real, empathetic human. Do NOT use stiff template phrases like "你如何理解..." or "XXX代表的深层意义".',
+      '- If the user\'s answer is very brief (like one or two words), briefly acknowledge their feeling, then ask a natural related open question.',
+      '- Do NOT directly quote the user mechanically (e.g. do not say "关于‘某词’...").',
       '- Must not repeat previous questions',
       '- Chinese only',
       '- Must be open-ended and require narration',
       '- Do NOT use yes/no style such as 是否、会不会、有没有、是不是、能不能',
-      '- Prefer prompts like 请具体描述 / 具体发生了什么 / 你如何理解',
     ].join('\n');
     const prompt = [
       promptTemplate,
