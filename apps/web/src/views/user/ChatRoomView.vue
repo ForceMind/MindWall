@@ -60,7 +60,7 @@ const messageIdSet = new Set<string>();
 const kind = computed(() => String(route.params.kind || 'match'));
 const id = computed(() => String(route.params.id || ''));
 const isMatchChat = computed(() => kind.value === 'match');
-const canBreakWall = computed(() => isMatchChat.value && wall.value.wallReady && !wall.value.wallBroken);
+const canBreakWall = computed(() => wall.value.wallReady && !wall.value.wallBroken);
 
 function aiHistoryKey() { return ''; }.${id.value}`;
 }
