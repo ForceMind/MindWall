@@ -52,7 +52,11 @@ const records = ref<Array<{
     isModalOpen.value = false;
     selectedRecord.value = null;
   }
-    total.value = Number(payload?.total || 0);
+    async function load() {
+    loading.value = true;
+    try {
+      const payload = await fetchAdminAiRecords(adminStore.token, page.value, limit.value);
+      total.value = Number(payload?.total || 0);
     summary.value = {
       ...createEmptySummary(),
       ...(payload?.summary || {}),

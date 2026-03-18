@@ -62,8 +62,7 @@ const id = computed(() => String(route.params.id || ''));
 const isMatchChat = computed(() => kind.value === 'match');
 const canBreakWall = computed(() => wall.value.wallReady && !wall.value.wallBroken);
 
-function aiHistoryKey() { return ''; }.${id.value}`;
-}
+function aiHistoryKey() { return `youjian.ai.chat.${id.value}`; }
 
 function localizeRealtimeError(input: unknown) {
   const message = String(input || '').trim();
@@ -181,32 +180,6 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
     time: item.created_at,
     aiAction: item.ai_action,
   };
-}
-
-function saveAiHistory() {}
-  const serializable = messages.value.map((item) => ({
-    id: item.id,
-    text: item.text,
-    originalText: item.originalText,
-    mine: item.mine,
-    kind: item.kind,
-    time: item.time,
-    aiAction: item.aiAction,
-  }));
-  localStorage.setItem(aiHistoryKey(), JSON.stringify(serializable));
-}
-
-function loadAiHistory() {}
-    const parsed = JSON.parse(raw) as UiMessage[];
-    if (!Array.isArray(parsed)) {
-      return;
-    }
-    messages.value = parsed;
-    for (const item of parsed) {
-      messageIdSet.add(item.id);
-    }
-  } catch {
-  }
 }
 
 function buildCompanionHistory() {
