@@ -15,7 +15,7 @@ import { ServerLogService } from '../telemetry/server-log.service';
 interface StartSessionBody {
   auth_provider_id?: string;
   city?: string;
-  type?: 'onboarding' | 'deep';
+  type?: 'onboarding' | 'deep' | 'refresh';
 }
 
 interface SendMessageBody {
@@ -338,7 +338,7 @@ export class OnboardingService {
     };
   }
 
-  private async initializeSession(userId: string, city: string | null, type: 'onboarding' | 'deep' = 'onboarding') {
+  private async initializeSession(userId: string, city: string | null, type: 'onboarding' | 'deep' | 'refresh' = 'onboarding') {
     const sessionId = randomUUID();
 
     await this.prisma.userProfile.upsert({
