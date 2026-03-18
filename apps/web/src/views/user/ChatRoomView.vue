@@ -497,7 +497,7 @@ async function sendMessage() {
       wall.value.wallReady = true;
       addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
     }
-        saveAiHistory();
+        // saveAiHistory removed
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -512,7 +512,7 @@ async function submitWallDecision(accept: boolean) {
       wall.value.status = 'wall_broken';
       wall.value.wallReady = false;
       addSystemMessage('破壁已完成，后续消息不再改写。', 'wall-broken');
-      saveAiHistory();
+      // saveAiHistory removed
       noticeStore.show('已同意破壁，对方也已同意。', 'success');
     } else {
       noticeStore.show('已提交暂不破壁', 'info');
@@ -564,7 +564,7 @@ watch(
 onBeforeUnmount(() => {
   stopSocket();
   if (!isMatchChat.value) {
-    saveAiHistory();
+    // saveAiHistory removed
   }
   if (listRef.value) {
     listRef.value.removeEventListener('scroll', handleListScroll);

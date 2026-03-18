@@ -226,18 +226,26 @@ export class CompanionService {
       },
     ];
 
-    // Add conversation history as separate user/assistant messages
-    for (const turn of history.slice(0, -1)) {
-      chatMessages.push({
-        role: turn.role === 'assistant' ? 'assistant' : 'user',
-        content: turn.text,
-      });
+    let historyText = '【历史对话记录】\n';
+    if (history.length > 1) {
+      for (const turn of history.slice(0, -1)) {
+        const speaker = turn.role === 'assistant' ? persona.name : '用户';
+        historyText += `${speaker}: ${turn.text}\n`;
+      }
+    } else {
+      historyText += '(无)\n';
     }
 
-    // The last user message as the final user turn
+    const finalPrompt = [
+      historyText,
+      '\n【当前用户最新回复】',
+      lastUserMessage,
+      `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀，必须要接上之前的话题，绝不能重复打招呼）。`
+    ].join('\n');
+
     chatMessages.push({
       role: 'user',
-      content: lastUserMessage,
+      content: finalPrompt,
     });
 
     if (this.isIdentityProbe(lastUserMessage)) {
