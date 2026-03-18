@@ -30,7 +30,6 @@ const tags = ref<PublicTag[]>([]);
 const chatBoxRef = ref<HTMLElement | null>(null);
 const inputWarning = ref('');
 const turnsCollapsed = ref(false);
-const skipping = ref(false);
 
 async function bootstrapSession() {
   if (!userStore.token) {
@@ -146,31 +145,62 @@ function scrollToBottom() {
   chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
 }
 
-async function skipInterview() {
-  if (!sessionId.value || !userStore.token || skipping.value) return;
+async function changeQuestion() {
+  if (!sessionId.value || !userStore.token || sending.value) return;
 
-  skipping.value = true;
+  sending.value = true;
   pageError.value = '';
+  inputWarning.value = '';
+  turns.value.push({ role: 'user', text: '换一个问题吧' });
+  await nextTick();
+  scrollToBottom();
+
   try {
-    turnsCollapsed.value = true;
-    analyzing.value = true;
-    analyzeHint.value = '正在生成你的画像...';
+    const payload = await sendOnboardingMessage(userStore.token, sessionId.value, '', true) as Record<string, unknown>;
 
-    const payload = await skipOnboardingSession(userStore.token, sessionId.value);
-    await new Promise((r) => setTimeout(r, 1500));
-    analyzing.value = false;
+    if (payload.status === 'in_progress') {
+      turns.value.push({ role: 'assistant', text: String(payload.assistant_message) });
+      await nextTick();
+      scrollToBottom();
+      return;
+    }
 
-    done.value = true;
-    summary.value = String(payload.onboarding_summary || '');
-    tags.value = (payload.public_tags || []) as PublicTag[];
-    await userStore.refreshViewer();
-    noticeStore.show('访谈已跳过，已生成基础画像', 'success');
+    // Since skip might finish the interview if it was the last question
+    if (payload.status === 'completed') {
+      sending.value = false;
+      turnsCollapsed.value = true;
+      analyzing.value = true;
+      
+      const hints = [
+        'AI 正在理解你的表达...',
+        '正在生成你的心理画像...',
+        '几乎完成了...',
+      ];
+      analyzeHint.value = hints[0];
+      let hintIndex = 1;
+      const hintTimer = setInterval(() => {
+        if (hintIndex < hints.length) {
+          analyzeHint.value = hints[hintIndex];
+          hintIndex++;
+        }
+      }, 1800);
+
+      await new Promise((r) => setTimeout(r, hints.length * 1800 + 500));
+      clearInterval(hintTimer);
+      analyzing.value = false;
+
+      done.value = true;
+      summary.value = String(payload.onboarding_summary || '');
+      tags.value = (payload.public_tags || []) as PublicTag[];
+      await userStore.refreshViewer();
+      noticeStore.show('访谈完成，已生成画像', 'success');
+      return;
+    }
+
   } catch (error) {
-    analyzing.value = false;
-    turnsCollapsed.value = false;
     pageError.value = toErrorMessage(error);
   } finally {
-    skipping.value = false;
+    sending.value = false;
   }
 }
 
@@ -244,8 +274,8 @@ onBeforeUnmount(() => {
             @keydown.enter.exact.prevent="submitAnswer"
           />
           <div class="row" style="gap: 8px">
-            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skipping" @click="skipInterview" style="font-size: 13px; white-space: nowrap">
-              跳过
+            <button class="btn btn-ghost" type="button" :disabled="loading || sending" @click="changeQuestion" style="font-size: 13px; white-space: nowrap">
+              换一题
             </button>
             <button class="btn btn-primary" type="button" :disabled="loading || sending || !answer.trim()" @click="submitAnswer">
               {{ sending ? '发送中' : '发送' }}

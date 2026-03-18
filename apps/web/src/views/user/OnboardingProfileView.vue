@@ -26,9 +26,11 @@ const pageError = ref('');
 const showConfirm = ref(false);
 const computedYear = ref(0);
 const computedMonth = ref(0);
+const modalError = ref('');
 
 function previewSubmit() {
   pageError.value = '';
+  modalError.value = '';
   if (!selectedGender.value) {
     pageError.value = '请选择性别。';
     return;
@@ -49,16 +51,30 @@ async function submit() {
   pageError.value = '';
   
   const now = new Date();
-  let finalAge = now.getFullYear() - computedYear.value;
+  
+  const y = Number(computedYear.value);
+  const m = Number(computedMonth.value);
+  if (!Number.isFinite(y) || y < 1900 || y > now.getFullYear()) {
+    modalError.value = '请输入合法的出生年份（如 1995）';
+    return;
+  }
+  if (!Number.isFinite(m) || m < 1 || m > 12) {
+    modalError.value = '请输入合法的出生月份（1-12）';
+    return;
+  }
+
+  let finalAge = now.getFullYear() - y;
   // If the user's birth month hasn't occurred this year, they are 1 year younger
-  if (now.getMonth() + 1 < computedMonth.value) {
+  if (now.getMonth() + 1 < m) {
     finalAge -= 1;
   }
 
   if (!Number.isFinite(finalAge) || finalAge < 18 || finalAge > 99) {
-    pageError.value = '计算出的年龄超出范围(18-99)。';
+    modalError.value = '计算出的年龄超出范围(18-99岁)。';
     return;
   }
+  
+  showConfirm.value = false;
 
   if (!userStore.token) {
     router.replace('/login');
@@ -142,9 +158,11 @@ async function submit() {
           <input v-model.number="computedMonth" type="number" class="input" min="1" max="12" />
         </label>
 
+        <p v-if="modalError" class="badge badge-danger" style="margin-top: 8px; justify-content: flex-start">{{ modalError }}</p>
+
         <div class="row" style="margin-top: 24px; gap: 12px; justify-content: flex-end;">
           <button class="btn btn-ghost" type="button" @click="showConfirm = false">取消</button>
-          <button class="btn btn-primary" type="button" @click="() => { showConfirm = false; submit(); }" :disabled="loading">
+          <button class="btn btn-primary" type="button" @click="submit" :disabled="loading">
             确认并继续
           </button>
         </div>

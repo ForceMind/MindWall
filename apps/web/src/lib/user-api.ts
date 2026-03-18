@@ -153,7 +153,7 @@ export function startOnboardingSession(token: string, type: 'onboarding' | 'deep
   }>('/onboarding/me/session', {
     method: 'POST',
     token,
-    body: JSON.stringify({ type }),
+    body: { type },
   });
 }
 
@@ -181,7 +181,7 @@ export function sendOnboardingMessage(token: string, sessionId: string, message:
   >(`/onboarding/me/session/${sessionId}/messages`, {
     method: 'POST',
     token,
-    body: { message },
+    body: { message, skip },
   });
 }
 
