@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
 import {
@@ -23,6 +23,10 @@ const refreshing = ref(false);
 const pageError = ref('');
 const cityScope = ref<string | null>(null);
 const contacts = ref<ContactSession[]>([]);
+  const sessionTab = ref<'active'|'history'>('active');
+  const contactsPage = ref(1);
+  const contactsTotal = ref(0);
+  const contactsLoading = ref(false);
 const candidates = ref<CandidateContact[]>([]);
 const linkingCandidateId = ref('');
 const activePane = ref<'sessions' | 'discover'>('sessions');
@@ -87,7 +91,28 @@ function getAiSessionsFromLocal(): ContactSession[] {
   return sessions;
 }
 
-async function loadData(isRefresh = false) {
+
+  async function loadSessions() {
+    if (!userStore.token) return;
+    contactsLoading.value = true;
+    try {
+      const payload = await fetchContacts(userStore.token, sessionTab.value, contactsPage.value);
+      contacts.value = payload.contacts;
+      contactsTotal.value = payload.total || 0;
+    } catch (e) {
+      console.error(e);
+      // fallback
+    } finally {
+      contactsLoading.value = false;
+    }
+  }
+
+  watch(sessionTab, () => {
+    contactsPage.value = 1;
+    loadSessions();
+  });
+
+  async function loadData(isRefresh = false) {
   if (!userStore.token) {
     router.replace('/login');
     return;
@@ -101,15 +126,11 @@ async function loadData(isRefresh = false) {
   }
 
   try {
-    const [contactPayload, candidatePayload] = await Promise.all([
-      fetchContacts(userStore.token),
-      fetchCandidates(userStore.token),
-    ]);
-
-    candidates.value = candidatePayload.candidates;
-    cityScope.value = candidatePayload.city_scope;
-    cachePersonaNames(candidatePayload.candidates);
-    contacts.value = [...getAiSessionsFromLocal(), ...contactPayload.contacts];
+    const candidatePayload = await fetchCandidates(userStore.token);
+      candidates.value = candidatePayload.candidates;
+      cityScope.value = candidatePayload.city_scope;
+      cachePersonaNames(candidatePayload.candidates);
+      await loadSessions();
 
     if (contacts.value.length === 0 && candidates.value.length > 0) {
       activePane.value = 'discover';
@@ -122,8 +143,8 @@ async function loadData(isRefresh = false) {
   }
 }
 
-function openMatch(matchId: string) {
-  if (matchId.startsWith('ai_')) {
+function openMatch(matchId: string, isAi?: boolean) {
+  if (isAi || matchId.startsWith('ai_')) {
     router.push(`/chat/ai/${matchId}`);
     return;
   }
@@ -137,7 +158,7 @@ async function openCandidate(candidate: CandidateContact) {
   }
 
   if (candidate.match_id) {
-    openMatch(candidate.match_id);
+    openMatch(candidate.match_id, candidate.candidate_type === 'ai');
     return;
   }
 
@@ -154,7 +175,7 @@ async function openCandidate(candidate: CandidateContact) {
       'success',
     );
     await loadData(true);
-    openMatch(result.match_id);
+    openMatch(result.match_id, false);
   } catch (error) {
     noticeStore.show(toErrorMessage(error), 'error');
   } finally {
@@ -267,7 +288,7 @@ onMounted(() => {
 
               <div class="row" style="justify-content: space-between">
                 <span class="badge badge-accent">共鸣值 {{ item.resonance_score }}</span>
-                <button class="btn btn-primary" type="button" @click="openMatch(item.match_id)">
+                <button class="btn btn-primary" type="button" @click="openMatch(item.match_id, item.is_ai)">
                   进入会话
                 </button>
               </div>

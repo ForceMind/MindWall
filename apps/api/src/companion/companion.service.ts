@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, NotFoundException, Injectable, Logger } from '@nestjs/common';
 import { PRESET_PERSONAS, BasePersona } from './personas';
 import { UserTagType } from '@prisma/client';
 import { AdminConfigService } from '../admin/admin-config.service';
@@ -15,6 +15,7 @@ interface CompanionTurnInput {
 interface CompanionRequestBody {
   history?: CompanionTurnInput[];
   companion_id?: string;
+  session_id?: string;
 }
 
 interface DynamicPersonaContext {
@@ -37,8 +38,85 @@ export class CompanionService {
     private readonly serverLogService: ServerLogService,
   ) {}
 
+  async getMessages(userId: string, sessionId: string) {
+    const session = await this.prisma.companionSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session || session.user_id !== userId) {
+      throw new NotFoundException('Session not found');
+    }
+    const messages = await this.prisma.companionMessage.findMany({
+      where: { session_id: sessionId },
+      orderBy: { created_at: 'asc' },
+    });
+    const personaDef = PRESET_PERSONAS.find(p => p.id === session.persona_id);
+    return {
+      session_id: session.id,
+      companion_id: session.persona_id,
+      name: session.persona_name || personaDef?.name || 'AI Companion',
+      avatar: '/assets/avatars/bot-1.png',
+      messages: messages.map(m => ({
+        id: m.id,
+        role: m.sender_type,
+        text: m.ai_rewritten_text,
+        created_at: m.created_at,
+      }))
+    };
+  }
+
   async respond(userId: string, body: CompanionRequestBody) {
-    const history = this.normalizeHistory(body.history || []);
+    if (!body.session_id && !body.companion_id) {
+      throw new BadRequestException('session_id or companion_id is required.');
+    }
+
+    let companionSession;
+    if (body.session_id) {
+      companionSession = await this.prisma.companionSession.findUnique({
+        where: { id: body.session_id },
+      });
+      if (!companionSession || companionSession.user_id !== userId) {
+        throw new NotFoundException('Session not found.');
+      }
+      body.companion_id = companionSession.persona_id;
+    } else {
+      companionSession = await this.prisma.companionSession.findFirst({
+        where: { user_id: userId, persona_id: body.companion_id, status: 'active' },
+        orderBy: { updated_at: 'desc' }
+      });
+      if (!companionSession) {
+        companionSession = await this.prisma.companionSession.create({
+          data: {
+            user_id: userId,
+            persona_id: body.companion_id!,
+            persona_name: 'AI Companion',
+          }
+        });
+      }
+    }
+
+    const dbMessages = await this.prisma.companionMessage.findMany({
+      where: { session_id: companionSession.id },
+      orderBy: { created_at: 'asc' },
+    });
+
+    let rawHistory = dbMessages.map((m: any) => ({ role: m.sender_type, text: m.ai_rewritten_text }));
+    if (body.history && body.history.length > 0) {
+      const newMessages = body.history;
+      const lastMsg = newMessages[newMessages.length - 1];
+      if (lastMsg && lastMsg.role === 'user') {
+        rawHistory.push({ role: 'user', text: lastMsg.text });
+        await this.prisma.companionMessage.create({
+          data: {
+            session_id: companionSession.id,
+            sender_type: 'user',
+            original_text: lastMsg.text,
+            ai_rewritten_text: lastMsg.text || '',
+          }
+        });
+      }
+    }
+
+    const history = this.normalizeHistory(rawHistory);
     if (history.length === 0) {
       throw new BadRequestException('history is required.');
     }
@@ -75,6 +153,13 @@ export class CompanionService {
     }
 
     const persona = this.resolvePersona(body.companion_id, userId, profile?.city || null);
+    if (companionSession.persona_name === 'AI Companion') {
+      await this.prisma.companionSession.update({
+        where: { id: companionSession.id },
+        data: { persona_name: persona.name }
+      });
+      companionSession.persona_name = persona.name;
+    }
     const includeInterview = persona.id === 'ai_psychologist';
 
     const dynamicCtx = await this.buildDynamicPersonaContext(userId, includeInterview);
@@ -157,11 +242,22 @@ export class CompanionService {
     });
 
     if (this.isIdentityProbe(lastUserMessage)) {
+      const reply = this.buildIdentityDeflectionReply(lastUserMessage);
+      
+      await this.prisma.companionMessage.create({
+        data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply }
+      });
+      await this.prisma.companionSession.update({
+        where: { id: companionSession.id },
+        data: { updated_at: new Date() }
+      });
+
       return {
+        session_id: companionSession.id,
         mode: 'simulated_contact',
         contact_id: persona.id,
         contact_name: persona.name,
-        reply: this.buildIdentityDeflectionReply(lastUserMessage),
+        reply,
       };
     }
 
@@ -174,7 +270,16 @@ export class CompanionService {
       );
     const reply = this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
 
+    await this.prisma.companionMessage.create({
+      data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply }
+    });
+    await this.prisma.companionSession.update({
+      where: { id: companionSession.id },
+      data: { updated_at: new Date() }
+    });
+
     return {
+      session_id: companionSession.id,
       mode: 'simulated_contact',
       contact_id: persona.id,
       contact_name: persona.name,

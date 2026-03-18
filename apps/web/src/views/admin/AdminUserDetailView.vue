@@ -17,6 +17,25 @@ const loading = ref(false);
 const pageError = ref('');
 const detail = ref<Record<string, any> | null>(null);
 
+const activeTab = ref<'timeline' | 'ai'>('timeline');
+const timelinePage = ref(1);
+const aiPage = ref(1);
+const PAGE_SIZE = 15;
+
+const paginatedTimeline = computed(() => {
+  const all = detail.value?.timeline || [];
+  const start = (timelinePage.value - 1) * PAGE_SIZE;
+  return all.slice(start, start + PAGE_SIZE);
+});
+const timelineTotalPages = computed(() => Math.max(1, Math.ceil((detail.value?.timeline?.length || 0) / PAGE_SIZE)));
+
+const paginatedAiRecords = computed(() => {
+  const all = detail.value?.recent?.ai_records || [];
+  const start = (aiPage.value - 1) * PAGE_SIZE;
+  return all.slice(start, start + PAGE_SIZE);
+});
+const aiTotalPages = computed(() => Math.max(1, Math.ceil((detail.value?.recent?.ai_records?.length || 0) / PAGE_SIZE)));
+
 const userId = computed(() => String(route.params.userId || ''));
 const user = computed(() => detail.value?.user || null);
 
@@ -126,48 +145,73 @@ onMounted(() => {
 
     <section v-if="detail" class="panel">
       <div class="panel-body column">
-        <h3 class="panel-title">时间线（最近）</h3>
-        <div class="card-list">
-          <article v-for="item in detail.timeline || []" :key="`${item.type}-${item.ts}-${item.title}`" class="list-card">
-            <div class="row" style="justify-content: space-between">
-              <strong>{{ item.title || item.type }}</strong>
-              <span class="muted" style="font-size: 12px">{{ formatDateTime(item.ts) }}</span>
-            </div>
-            <div class="muted">{{ item.detail || '-' }}</div>
-          </article>
-
-          <div v-if="(detail.timeline || []).length === 0" class="empty-box">暂无时间线记录</div>
+        <div class="tabs" style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <button 
+            :class="['btn', activeTab === 'timeline' ? 'btn-primary' : 'btn-ghost']" 
+            @click="activeTab = 'timeline'"
+          >
+            时间线
+          </button>
+          <button 
+            :class="['btn', activeTab === 'ai' ? 'btn-primary' : 'btn-ghost']" 
+            @click="activeTab = 'ai'"
+          >
+            最近 AI 记录
+          </button>
         </div>
-      </div>
-    </section>
 
-    <section v-if="detail" class="panel">
-      <div class="panel-body column">
-        <h3 class="panel-title">最近 AI 记录</h3>
-        <div class="table-wrap">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>功能</th>
-                <th>模型</th>
-                <th>Token</th>
-                <th>费用</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in detail.recent?.ai_records || []" :key="row.id">
-                <td>{{ formatTime(row.created_at) }}</td>
-                <td>{{ row.feature }}</td>
-                <td>{{ row.model }}</td>
-                <td>{{ row.total_tokens }}</td>
-                <td>{{ row.estimated_cost_usd }}</td>
-              </tr>
-              <tr v-if="(detail.recent?.ai_records || []).length === 0">
-                <td colspan="5" class="muted">暂无记录</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-if="activeTab === 'timeline'">
+          <div class="card-list">
+            <article v-for="item in paginatedTimeline" :key="`${item.type}-${item.ts}-${item.title}`" class="list-card">
+              <div class="row" style="justify-content: space-between">
+                <strong>{{ item.title || item.type }}</strong>
+                <span class="muted" style="font-size: 12px">{{ formatDateTime(item.ts) }}</span>
+              </div>
+              <div class="muted">{{ item.detail || '-' }}</div>
+            </article>
+
+            <div v-if="paginatedTimeline.length === 0" class="empty-box">暂无时间线记录</div>
+          </div>
+          
+          <div class="pager" v-if="timelineTotalPages > 1" style="margin-top: 16px;">
+            <button class="btn btn-ghost" type="button" :disabled="timelinePage <= 1" @click="timelinePage -= 1">上一页</button>
+            <span class="muted">第 {{ timelinePage }} / {{ timelineTotalPages }} 页 (共 {{ detail.timeline?.length || 0 }} 条)</span>
+            <button class="btn btn-ghost" type="button" :disabled="timelinePage >= timelineTotalPages" @click="timelinePage += 1">下一页</button>
+          </div>
+        </div>
+
+        <div v-if="activeTab === 'ai'">
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>功能</th>
+                  <th>模型</th>
+                  <th>Token</th>
+                  <th>费用</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in paginatedAiRecords" :key="row.id">
+                  <td>{{ formatTime(row.created_at) }}</td>
+                  <td>{{ row.feature }}</td>
+                  <td>{{ row.model }}</td>
+                  <td>{{ row.total_tokens }}</td>
+                  <td>{{ row.estimated_cost_usd }}</td>
+                </tr>
+                <tr v-if="paginatedAiRecords.length === 0">
+                  <td colspan="5" class="muted">暂无记录</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pager" v-if="aiTotalPages > 1" style="margin-top: 16px;">
+            <button class="btn btn-ghost" type="button" :disabled="aiPage <= 1" @click="aiPage -= 1">上一页</button>
+            <span class="muted">第 {{ aiPage }} / {{ aiTotalPages }} 页 (共 {{ detail.recent?.ai_records?.length || 0 }} 条)</span>
+            <button class="btn btn-ghost" type="button" :disabled="aiPage >= aiTotalPages" @click="aiPage += 1">下一页</button>
+          </div>
         </div>
       </div>
     </section>

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
-import { askCompanion, fetchMatchMessages, fetchWallState, type SandboxMessage } from '@/lib/user-api';
+import { askCompanion, fetchCompanionMessages, fetchMatchMessages, fetchWallState, type SandboxMessage } from '@/lib/user-api';
 import { formatTime } from '@/lib/format';
 import { toErrorMessage } from '@/lib/api-error';
 import { SandboxSocket, type SandboxInbound } from '@/lib/sandbox-socket';
@@ -40,6 +40,8 @@ const isPeerOffline = ref(false);
 const inputText = ref('');
 const title = ref('会话');
 const messages = ref<UiMessage[]>([]);
+  const aiSessionId = ref('');
+  const actualPersonaId = ref('');
 const listRef = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
 const wall = ref<WallStatus>({
@@ -60,9 +62,7 @@ const id = computed(() => String(route.params.id || ''));
 const isMatchChat = computed(() => kind.value === 'match');
 const canBreakWall = computed(() => isMatchChat.value && wall.value.wallReady && !wall.value.wallBroken);
 
-function aiHistoryKey() {
-  const uid = userStore.viewer?.user.id || 'guest';
-  return `mindwall.ai.chat.${uid}.${id.value}`;
+function aiHistoryKey() { return ''; }.${id.value}`;
 }
 
 function localizeRealtimeError(input: unknown) {
@@ -183,10 +183,7 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
   };
 }
 
-function saveAiHistory() {
-  if (isMatchChat.value) {
-    return;
-  }
+function saveAiHistory() {}
   const serializable = messages.value.map((item) => ({
     id: item.id,
     text: item.text,
@@ -199,12 +196,7 @@ function saveAiHistory() {
   localStorage.setItem(aiHistoryKey(), JSON.stringify(serializable));
 }
 
-function loadAiHistory() {
-  try {
-    const raw = localStorage.getItem(aiHistoryKey());
-    if (!raw) {
-      return;
-    }
+function loadAiHistory() {}
     const parsed = JSON.parse(raw) as UiMessage[];
     if (!Array.isArray(parsed)) {
       return;
@@ -396,19 +388,43 @@ async function initMatchChat() {
 }
 
 async function initAiChat() {
-    const uid = userStore.viewer?.user.id || 'guest';
-    title.value = localStorage.getItem(`mindwall.ai.persona.${uid}.${id.value}.name`) || '匿名会话';
-    
-    const hasWallBroken = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-broken');
+    title.value = '匿名会话';
+    try {
+      if (id.value && !id.value.startsWith('ai_')) {
+         aiSessionId.value = id.value;
+         const res = await fetchCompanionMessages(userStore.token!, id.value);
+         title.value = res.name || 'AI Companion';
+         actualPersonaId.value = res.companion_id;
+         messages.value = res.messages.map((m: any) => ({
+           id: m.id,
+           text: m.text,
+           mine: m.role === 'user',
+           kind: 'text',
+           time: m.created_at,
+         }));
+         for (const item of messages.value) {
+           messageIdSet.add(item.id);
+         }
+      } else {
+         actualPersonaId.value = id.value;
+         aiSessionId.value = '';
+         title.value = '匹配对象 (AI)';
+      }
+    } catch (err) {
+      console.error(err);
+      pageError.value = '加载会话失败';
+    }
+
+    const hasWallBroken = messages.value.some(m => m.kind === 'system' && (m as any).systemType === 'wall-broken');
     if (hasWallBroken) {
       wall.value.wallBroken = true;
       wall.value.status = 'wall_broken';
     } else {
       wall.value.wallBroken = false;
       wall.value.status = 'active_sandbox';
-      
+
       const myMsgs = messages.value.filter(m => m.mine).length;
-      const hasWallReady = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-ready');
+      const hasWallReady = messages.value.some(m => m.kind === 'system' && (m as any).systemType === 'wall-ready');
       if (myMsgs >= 3 && !hasWallReady) {
          wall.value.wallReady = true;
          addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
@@ -417,12 +433,12 @@ async function initAiChat() {
       }
     }
 
-  if (messages.value.length === 0) {
-    addSystemMessage('你们已建立匿名连接，为了安全初始将在沙盒中交流，内容可能由AI转述。', 'init');
+    if (messages.value.length === 0) {
+      addSystemMessage('你们已建立匿名连接，为了安全初始将在沙盒中交流，内容可能由AI转述。', 'init');
+    }
   }
-}
 
-async function initialize() {
+  async function initialize() {
   stopSocket();
   resetState();
 
@@ -487,14 +503,20 @@ async function sendMessage() {
 
   try {
     const history = buildCompanionHistory();
-    const payload = await askCompanion(userStore.token, id.value, history);
-    pushMessage({
-      id: `a-${Date.now()}`,
-      text: payload.reply,
-      mine: false,
-      kind: 'text',
-      time: new Date().toISOString(),
-    });    
+    
+      const payload = await askCompanion(userStore.token, actualPersonaId.value, history, aiSessionId.value);
+      if (payload.session_id) {
+        aiSessionId.value = payload.session_id;
+        // Optionally update the URL silently so refresh works, but we can also just leave it since the user relies on Match List
+      }
+      pushMessage({
+        id: `a-${Date.now()}`,
+        text: payload.reply,
+        mine: false,
+        kind: 'text',
+        time: new Date().toISOString(),
+      });
+    
     // Evaluate if AI sandbox chat can be broken
     const myMsgs = messages.value.filter(m => m.mine).length;
     const hasWallReady = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-ready');

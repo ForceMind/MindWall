@@ -48,17 +48,18 @@ export interface CandidateContact {
 
 export interface ContactSession {
   match_id: string;
-  counterpart_user_id: string;
+  counterpart_user_id?: string;
   candidate_type: 'user' | 'ai';
+  is_ai?: boolean;
   disclosure: string;
   name: string;
   avatar: string | null;
-  city: string | null;
-  status: 'pending' | 'active_sandbox' | 'wall_broken' | 'rejected';
-  resonance_score: number;
-  ai_match_reason: string | null;
+  city?: string | null;
+  status: string;
+  resonance_score?: number | null;
+  ai_match_reason?: string | null;
   updated_at: string;
-  public_tags: PublicTag[];
+  public_tags?: PublicTag[];
 }
 
 export interface SandboxMessage {
@@ -219,11 +220,12 @@ export function fetchCandidates(token: string) {
   });
 }
 
-export function fetchContacts(token: string) {
+export function fetchContacts(token: string, tab: string = 'active', page: number = 1) {
   return httpRequest<{
     total: number;
+    page: number;
     contacts: ContactSession[];
-  }>('/contacts/me/list', {
+  }>(`/contacts/me/list?tab=${tab}&page=${page}`, {
     token,
   });
 }
@@ -239,6 +241,10 @@ export function connectCandidate(token: string, targetUserId: string) {
     token,
     body: { target_user_id: targetUserId },
   });
+}
+
+export function fetchCompanionMessages(token: string, sessionId: string) {
+  return httpRequest<any>(`/companion/sessions/${sessionId}/messages`, { token });
 }
 
 export function fetchMatchMessages(token: string, matchId: string, limit = 80) {
@@ -269,17 +275,19 @@ export function askCompanion(
   token: string,
   companionId: string,
   history: Array<{ role: string; text: string }>,
+  sessionId?: string,
 ) {
   return httpRequest<{
-    mode: 'simulated_contact';
     contact_id: string;
     contact_name: string;
     reply: string;
+    session_id?: string;
   }>('/companion/respond', {
     method: 'POST',
     token,
     body: {
       companion_id: companionId,
+      session_id: sessionId,
       history,
     },
   });

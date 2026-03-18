@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { SessionAuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { SessionUser } from '../auth/auth.types';
@@ -10,8 +10,13 @@ export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
   @Get('me/list')
-  async list(@CurrentUser() user: SessionUser) {
-    return this.contactsService.getConnectedContacts(user.userId);
+  async list(
+    @CurrentUser() user: SessionUser,
+    @Query('tab') tab?: string,
+    @Query('page') page?: string,
+  ) {
+    const pageNum = parseInt(page || '1', 10);
+    return this.contactsService.getConnectedContacts(user.userId, tab || 'active', pageNum);
   }
 
   @Get('me/candidates')

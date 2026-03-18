@@ -546,7 +546,7 @@ export class OnboardingService {
     const apiKey = aiConfig.openaiApiKey;
     if (!apiKey) {
       // Without AI, apply simple heuristics only
-      const isSkipPattern = /换[个一]?题|不[懂懂]|不知道|跳过|太难|不会答/i;
+      const isSkipPattern = /换[个一]?[题问]|不[大太]?[懂知道]|跳过|太难|不会答|不想说/i;
       const isSkip = isSkipPattern.test(message);
       return { valid: stripped.length >= 4 || isSkip, is_skip: isSkip };
     }
@@ -575,7 +575,7 @@ export class OnboardingService {
 
     if (data === null) {
       // AI unavailable, fallback to accepting
-      const isSkipPattern = /换[个一]?题|不[懂懂]|不知道|跳过|太难|不会答/i;
+      const isSkipPattern = /换[个一]?[题问]|不[大太]?[懂知道]|跳过|太难|不会答|不想说/i;
       const isSkip = isSkipPattern.test(message);
       return { valid: stripped.length >= 4 || isSkip, is_skip: isSkip };
     }
@@ -729,7 +729,8 @@ export class OnboardingService {
       'Rules:',
       '- 4 to 8 public tags, minimum 4',
       '- 5 to 10 hidden traits',
-      '- hidden traits must include harassment_tendency',
+      '- hidden traits MUST use Chinese words for tag_name (e.g. "骚扰倾向" instead of harassment_tendency, "情绪稳定" instead of emotional_stability)',
+        '- All tag_name values (for BOTH public_tags and hidden_system_traits) MUST be entirely in Chinese',
       '- public tags should be emotionally meaningful, not generic hobbies',
       '- onboarding_summary should be one Chinese sentence, within 50 Chinese characters when possible',
       '- onboarding_summary MUST be in Chinese only, absolutely no English words',
@@ -864,9 +865,9 @@ export class OnboardingService {
       )
       .slice(0, 10);
 
-    if (!hiddenTags.some((tag) => tag.tag_name === 'harassment_tendency')) {
+    if (!hiddenTags.some((tag) => tag.tag_name === '骚扰倾向' || tag.tag_name === 'harassment_tendency')) {
       hiddenTags.push({
-        tag_name: 'harassment_tendency',
+        tag_name: '骚扰倾向',
         weight: 1,
         ai_justification: '默认处于低风险区间，后续会根据真实互动动态校准。',
       });
@@ -1027,27 +1028,27 @@ export class OnboardingService {
       public_tags: publicTags.slice(0, 8),
       hidden_system_traits: [
         {
-          tag_name: 'emotional_stability',
+          tag_name: '情绪稳定',
           weight: 7.3,
           ai_justification: '整体表达稳定，情绪波动可感知但未失控。',
         },
         {
-          tag_name: 'empathy',
+          tag_name: '共情能力',
           weight: 7.8,
           ai_justification: '对他人感受与关系氛围有较强感知。',
         },
         {
-          tag_name: 'boundary_respect',
+          tag_name: '边界尊重',
           weight: 8.4,
           ai_justification: '对边界、分寸和安全感有明确意识。',
         },
         {
-          tag_name: 'conflict_tolerance',
+          tag_name: '冲突容忍度',
           weight: 6.4,
           ai_justification: '面对差异时具备一定承受能力，但仍需要安全感支撑。',
         },
         {
-          tag_name: 'harassment_tendency',
+          tag_name: '骚扰倾向',
           weight: 1,
           ai_justification: '访谈阶段未观察到明显骚扰风险。',
         },
@@ -1118,20 +1119,29 @@ export class OnboardingService {
     latestUserAnswer: string,
     previousQuestions: string[],
   ) {
-    const anchor = this.pickAnswerAnchor(latestUserAnswer);
-    if (!anchor) {
+    const text = (latestUserAnswer || '').trim();
+    if (!text || text.length < 2) {
       return '';
     }
 
     const focusType = turnIndex % this.interviewFocuses.length;
-    const candidate =
-      focusType === 0
-        ? `你提到了“${anchor}”，具体说说这让你觉得自己身上哪个特质特别好？`
-        : focusType === 1
-          ? `关于“${anchor}”，你理想中的相处方式是什么样的？什么会让你觉得舒服和安全？`
-          : focusType === 2
-            ? `说到“${anchor}”，你觉得自己从中学到了什么？它怎样影响了现在的你？`
-            : `围绕“${anchor}”，你最希望别人能看到你的哪一面？请具体描述。`;
+    let candidate = '';
+    
+    switch (focusType) {
+      case 0:
+        candidate = '这似乎对你有挺深的影响。能具体聊聊，它如何展现或塑造了现在的你吗？';
+        break;
+      case 1:
+        candidate = '原来如此。那在平时的感情和关系里，什么样的相处模式会让你觉得舒服且安全？';
+        break;
+      case 2:
+        candidate = '听起来挺有感触的。这段经历最核心地教会了你什么？';
+        break;
+      case 3:
+      default:
+        candidate = '我大概理解了。那你最希望别人能越过表面现象，去看到你内心深处的哪一面？';
+        break;
+    }
 
     if (
       this.isRepeatedQuestion(candidate, previousQuestions) ||
@@ -1141,17 +1151,6 @@ export class OnboardingService {
     }
 
     return candidate;
-  }
-
-  private pickAnswerAnchor(answer: string) {
-    const text = (answer || '')
-      .replace(/\s+/g, ' ')
-      .replace(/[。！？!?.,，；;：:]/g, '')
-      .trim();
-    if (!text) {
-      return '';
-    }
-    return text.slice(0, 14);
   }
 
   private isRepeatedQuestion(candidate: string, previousQuestions: string[]) {
@@ -1378,6 +1377,9 @@ export class OnboardingService {
         inputTokens: usage?.prompt_tokens || usage?.total_tokens || 0,
         outputTokens: 0,
         totalTokens: usage?.total_tokens || usage?.prompt_tokens || 0,
+        metadata: {
+          prompt: text.slice(0, 500) + (text.length > 500 ? '...' : ''),
+        },
       });
       const vector = payload.data?.[0]?.embedding;
       if (!vector || vector.length !== 1536) {
@@ -1492,6 +1494,10 @@ export class OnboardingService {
         totalTokens:
           usage?.total_tokens ||
           (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+        metadata: {
+          prompt,
+          response: payload.choices?.[0]?.message?.content || '',
+        },
       });
       const content = payload.choices?.[0]?.message?.content?.trim();
       if (!content) {

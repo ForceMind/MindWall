@@ -156,29 +156,42 @@ export class ContactsService {
     };
   }
 
-  async getConnectedContacts(userId: string) {
-    const matches = await this.prisma.match.findMany({
-      where: {
-        OR: [{ user_a_id: userId }, { user_b_id: userId }],
-        status: {
-          in: [
-            MatchStatus.pending,
-            MatchStatus.active_sandbox,
-            MatchStatus.wall_broken,
-          ],
+  async getConnectedContacts(userId: string, tab = 'active', page = 1) {
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const isActiveTab = tab === 'active';
+    const matchStatuses: MatchStatus[] = isActiveTab 
+      ? [MatchStatus.pending, MatchStatus.active_sandbox, MatchStatus.wall_broken]
+      : [MatchStatus.rejected];
+      
+    const aiStatuses = isActiveTab ? ['active', 'active_sandbox'] : ['closed', 'history'];
+
+    const [matches, aiSessions] = await Promise.all([
+      this.prisma.match.findMany({
+        where: {
+          OR: [{ user_a_id: userId }, { user_b_id: userId }],
+          status: { in: matchStatuses },
         },
-      },
-      orderBy: [{ updated_at: 'desc' }],
-      select: {
-        id: true,
-        user_a_id: true,
-        user_b_id: true,
-        status: true,
-        resonance_score: true,
-        updated_at: true,
-        ai_match_reason: true,
-      },
-    });
+        orderBy: [{ updated_at: 'desc' }],
+        select: {
+          id: true,
+          user_a_id: true,
+          user_b_id: true,
+          status: true,
+          resonance_score: true,
+          updated_at: true,
+          ai_match_reason: true,
+        },
+      }),
+      this.prisma.companionSession.findMany({
+        where: {
+          user_id: userId,
+          status: { in: aiStatuses },
+        },
+        orderBy: [{ updated_at: 'desc' }],
+      })
+    ]);
 
     const counterpartIds = Array.from(
       new Set(
@@ -239,9 +252,8 @@ export class ContactsService {
       tagMap.set(tag.user_id, bucket);
     }
 
-    return {
-      total: matches.length,
-      contacts: matches.map((item) => {
+    const mergedContacts = [
+      ...matches.map((item) => {
         const counterpartId = item.user_a_id === userId ? item.user_b_id : item.user_a_id;
         const profile = profileMap.get(counterpartId);
         return {
@@ -260,6 +272,29 @@ export class ContactsService {
           public_tags: tagMap.get(counterpartId) || [],
         };
       }),
+      ...aiSessions.map(session => {
+        const personaDef = PRESET_PERSONAS.find(p => p.id === session.persona_id);
+        return {
+          match_id: session.id, // Using match_id for the front-end to know it's a chat
+          candidate_type: 'ai',
+          is_ai: true,
+          disclosure: 'AI Agent',
+          name: session.persona_name || personaDef?.name || 'AI Companion',
+          avatar: '/assets/avatars/bot-1.png',
+          status: session.status,
+          updated_at: session.updated_at,
+        };
+      })
+    ].sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime());
+
+    const total = mergedContacts.length;
+    const paginatedContacts = mergedContacts.slice(skip, skip + limit);
+
+    return {
+      total,
+      page,
+      limit,
+      contacts: paginatedContacts,
     };
   }
 

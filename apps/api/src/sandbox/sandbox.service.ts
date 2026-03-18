@@ -922,6 +922,10 @@ export class SandboxService {
         totalTokens:
           usage?.total_tokens ||
           (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+        metadata: {
+          prompt,
+          response: payload.choices?.[0]?.message?.content || '',
+        },
       });
 
       const content = payload.choices?.[0]?.message?.content?.trim();

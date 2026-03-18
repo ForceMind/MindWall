@@ -37,19 +37,21 @@ const records = ref<Array<{
   total_tokens: number;
   estimated_cost_usd: number;
   created_at: string;
-}>>([]);
+    metadata?: any;
+  }>>([]);
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)));
+  const isModalOpen = ref(false);
+  const selectedRecord = ref<any>(null);
 
-async function load() {
-  if (!adminStore.token) {
-    return;
+  function viewDetail(row: any) {
+    selectedRecord.value = row;
+    isModalOpen.value = true;
   }
 
-  loading.value = true;
-  pageError.value = '';
-  try {
-    const payload = await fetchAdminAiRecords(adminStore.token, page.value, limit.value);
+  function closeModal() {
+    isModalOpen.value = false;
+    selectedRecord.value = null;
+  }
     total.value = Number(payload?.total || 0);
     summary.value = {
       ...createEmptySummary(),
@@ -134,6 +136,7 @@ onMounted(() => {
                 <th>模型</th>
                 <th>总Token</th>
                 <th>估算费用</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -144,9 +147,12 @@ onMounted(() => {
                 <td>{{ row.model }}</td>
                 <td>{{ row.total_tokens }}</td>
                 <td>{{ formatUsd(row.estimated_cost_usd) }}</td>
+                <td>
+                  <button class="btn btn-ghost" style="padding: 2px 8px; font-size: 12px" type="button" @click="viewDetail(row)">详情</button>
+                </td>
               </tr>
               <tr v-if="records.length === 0 && !loading">
-                <td colspan="6" class="muted">暂无记录</td>
+                <td colspan="7" class="muted">暂无记录</td>
               </tr>
             </tbody>
           </table>
@@ -159,5 +165,63 @@ onMounted(() => {
         </div>
       </div>
     </section>
+
+    <!-- 详情模态框 -->
+    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+      <div class="modal" style="max-width: 800px; width: 90vw;">
+        <div class="modal-header">
+          <h3 class="modal-title">AI 生成详情 <span class="badge badge-primary">{{ selectedRecord?.model }}</span></h3>
+          <button class="btn btn-ghost" @click="closeModal">&times;</button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+          <div v-if="selectedRecord?.metadata?.prompt">
+            <h4>Prompt 发送内容</h4>
+            <pre class="code-block" style="white-space: pre-wrap; word-break: break-all; font-size: 13px; padding: 12px; background: var(--bg-alt); border-radius: 8px;">{{ JSON.stringify(selectedRecord.metadata.prompt, null, 2) }}</pre>
+          </div>
+          <div v-else>
+            <p class="muted">未记录 Prompt</p>
+          </div>
+          
+          <div v-if="selectedRecord?.metadata?.response" style="margin-top: 24px;">
+            <h4>AI 返回内容</h4>
+            <pre class="code-block" style="white-space: pre-wrap; word-break: break-all; font-size: 13px; padding: 12px; background: var(--bg-alt); border-radius: 8px;">{{ JSON.stringify(selectedRecord.metadata.response, null, 2) }}</pre>
+          </div>
+          <div v-else style="margin-top: 24px;">
+            <p class="muted">未记录 Response</p>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; padding-top: 16px;">
+          <button class="btn btn-primary" @click="closeModal">关闭</button>
+        </div>
+      </div>
+    </div>
   </AdminShell>
 </template>
+
+<style scoped>
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: var(--bg-card, #fff);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.modal-title { margin: 0; font-size: 18px; }
+.code-block {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+</style>

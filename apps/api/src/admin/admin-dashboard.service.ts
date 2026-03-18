@@ -909,7 +909,7 @@ export class AdminDashboardService {
 
     return timeline
       .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-      .slice(0, 160);
+      .slice(0, 500);
   }
 
   private formatMatchStatus(status: string) {
