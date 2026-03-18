@@ -105,11 +105,12 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleInboundEvent(clientId: string, payload: unknown) {
-    const event = payload as InboundEvent;
-    if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
-      this.send(clientId, { type: 'error', message: '无法识别的消息格式。' });
-      return;
-    }
+    try {
+      const event = payload as InboundEvent;
+      if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+        this.send(clientId, { type: 'error', message: '无法识别的消息格式。' });
+        return;
+      }
 
     if (event.type === 'ping') {
       this.send(clientId, { type: 'pong', ts: new Date().toISOString() });
@@ -152,6 +153,9 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.send(clientId, { type: 'error', message: '不支持的事件类型。' });
+    } catch (e: any) {
+      this.send(clientId, { type: 'error', message: e.message || '处理消息时发生未知错误。' });
+    }
   }
 
   private async handleAuth(clientId: string, event: AuthEvent) {

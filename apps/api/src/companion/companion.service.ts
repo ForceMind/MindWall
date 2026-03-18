@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { PRESET_PERSONAS, BasePersona } from './personas';
 import { UserTagType } from '@prisma/client';
 import { AdminConfigService } from '../admin/admin-config.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,16 +17,6 @@ interface CompanionRequestBody {
   companion_id?: string;
 }
 
-type Persona = {
-  id: string;
-  name: string;
-  rhythm: string;
-  attachment: string;
-  boundary: string;
-  emotion: string;
-  conflict: string;
-};
-
 interface DynamicPersonaContext {
   city: string | null;
   interviewSummary: string | null;
@@ -35,45 +26,8 @@ interface DynamicPersonaContext {
 @Injectable()
 export class CompanionService {
   private readonly logger = new Logger(CompanionService.name);
-  private readonly personaArchetypes: Persona[] = [
-    {
-      id: 'ai_reflective',
-      name: '匿名用户',
-      rhythm: '慢节奏、停顿后再回应',
-      attachment: '谨慎靠近型',
-      boundary: '尊重边界，不追问隐私',
-      emotion: '温和共情',
-      conflict: '先确认感受，再讨论分歧',
-    },
-    {
-      id: 'ai_boundary',
-      name: '匿名用户',
-      rhythm: '简洁直接',
-      attachment: '稳定对等型',
-      boundary: '偏清晰边界和规则感',
-      emotion: '理性克制',
-      conflict: '先定义问题，再给建议',
-    },
-    {
-      id: 'ai_warm',
-      name: '匿名用户',
-      rhythm: '轻松自然',
-      attachment: '陪伴支持型',
-      boundary: '不过度承诺',
-      emotion: '柔和鼓励',
-      conflict: '降低张力，逐步收敛',
-    },
-    {
-      id: 'ai_psychologist',
-      name: '心灵访谈师',
-      rhythm: '沉稳节奏、深度倾听',
-      attachment: '专业支持型',
-      boundary: '温暖但有边界',
-      emotion: '深度共情、不说教',
-      conflict: '多角度提问、逐步深化',
-    },
-  ];
-  private readonly userPersonaCache = new Map<string, Persona[]>();
+  private readonly personaArchetypes = PRESET_PERSONAS;
+  private readonly userPersonaCache = new Map<string, any>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -148,10 +102,11 @@ export class CompanionService {
       '3) 如果对方追问你的真实身份，只能自然回避并把话题转回对方感受。',
       '4) 回复长度 1-3 句，中文口语化，像真实陌生人聊天。',      '5) 绝对禁止使用心理咨询师语气，不要说"我理解你""我听到了""你的感受很重要"等模板句。',
       '6) 要像一个真实的同龄人聊天：会用语气词（嗯、哈、哦、诶）、会偶尔打错字或用缩写、会分享自己的经历。',
-      '7) 不要每句都回应对方情绪，真实的人有时候会岔开话题、开玩笑、或者说点无关紧要的话。',
+      '7) 不要每句都顺着说，必须生动活泼有趣，具备幽默感，会开玩笑、岔开话题。真实的人有血有肉，绝对不能木讷或者像个客服。',
       '8) 偶尔可以不完全同意对方，真实的人有自己的看法。',
       '9) 语气要自然随意，不要过于正式或煽情，像微信聊天而不是写作文。',
-      '10) 用词要口语化，避免书面语和成语堆砌。比如用"挺好的"而不是"甚好"。',    ].join('\n');
+      '10) 用词要口语化，避免书面语和成语堆砌。比如用"挺好的"而不是"甚好"。',
+      '11) 必须仔细阅读过往的聊天上下文！回应时要照顾到此前聊过的细节或梗，并继续延伸，绝不要说前后矛盾或重复的话。',    ].join('\n');
 
     const systemPrompt = [
       personaBasePrompt,
@@ -238,9 +193,11 @@ export class CompanionService {
       .slice(-20);
   }
 
-  private resolvePersona(companionId: string | undefined, userId: string, city: string | null): Persona {
-    const normalized = (companionId || '').trim().toLowerCase();
-    let archetype: Persona;
+  private resolvePersona(companionId: string | undefined, userId: string, city: string | null): BasePersona {
+    const rawId = (companionId || '').trim().toLowerCase();
+    const normalized = rawId.replace(/_\d+_\d+$/, ''); // Strip dynamic timestamp suffix
+
+    let archetype: BasePersona;
     if (normalized) {
       const found = this.personaArchetypes.find((item) => item.id === normalized);
       archetype = found || this.personaArchetypes[0];
@@ -259,7 +216,7 @@ export class CompanionService {
     }
 
     // Generate a unique anonymous name per user+persona combination
-    const dynamicName = this.generatePersonaName(userId, archetype.id, city);
+    const dynamicName = this.generatePersonaName(userId, rawId, city);
     return { ...archetype, name: dynamicName };
   }
 
@@ -314,7 +271,7 @@ export class CompanionService {
   private buildFallbackReply(
     lastUserMessage: string,
     publicTags: string[],
-    persona: Persona,
+    persona: BasePersona,
   ) {
     const anchor = lastUserMessage.slice(0, 18);
     const casualReplies = [
@@ -383,7 +340,7 @@ export class CompanionService {
     };
   }
 
-  private buildDynamicPersonaPromptLines(ctx: DynamicPersonaContext, persona: Persona): string[] {
+  private buildDynamicPersonaPromptLines(ctx: DynamicPersonaContext, persona: BasePersona): string[] {
     const lines: string[] = [];
 
     lines.push('角色个性化背景（根据用户数据生成，你必须融入角色）：');

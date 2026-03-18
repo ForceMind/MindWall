@@ -161,10 +161,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <UserShell title="匹配大厅" subtitle="流光匿名社交空间">
+  <UserShell title="匹配大厅" subtitle="流光匿名社交空间" :hide-header="true">
     <section class="panel">
       <div class="panel-body row" style="justify-content: space-between; align-items: flex-start">
-        <div class="row" style="min-width: 0">
+        <div class="row" style="min-width: 0; cursor: pointer;" @click="router.push('/profile')" title="查看主页">
           <img v-if="profileAvatar" :src="profileAvatar" alt="avatar" class="avatar" />
           <div style="min-width: 0">
             <div style="font-weight: 700">{{ profileName }}</div>
@@ -176,7 +176,7 @@ onMounted(() => {
 
         <div class="row" style="gap: 8px">
           <button
-            class="btn btn-ghost"
+            class="btn btn-secondary"
             type="button"
             style="font-size: 13px"
             @click="router.push('/onboarding/interview')"

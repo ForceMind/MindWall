@@ -4,6 +4,8 @@ export interface RuntimeConfig {
   openai_embedding_api_key?: string;
   openai_model?: string;
   openai_embedding_model?: string;
+  openai_input_price?: number;
+  openai_output_price?: number;
   web_origin?: string;
   updated_at?: string;
 }
@@ -14,5 +16,7 @@ export interface AiRuntimeConfig {
   openaiEmbeddingApiKey: string;
   openaiModel: string;
   openaiEmbeddingModel: string;
+  openaiInputPrice: number;
+  openaiOutputPrice: number;
   webOrigin: string;
 }

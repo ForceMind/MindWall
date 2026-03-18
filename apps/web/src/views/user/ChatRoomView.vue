@@ -36,6 +36,7 @@ const noticeStore = useNoticeStore();
 const loading = ref(false);
 const sending = ref(false);
 const pageError = ref('');
+const isPeerOffline = ref(false);
 const inputText = ref('');
 const title = ref('会话');
 const messages = ref<UiMessage[]>([]);
@@ -250,6 +251,7 @@ function handleSocketEvent(event: SandboxInbound) {
   }
 
   if (type === 'message_delivered') {
+    sending.value = false;
     const originalText = String(event.original_text || '');
     const rewrittenText = String(event.text || '');
     const aiAction = String(event.ai_action || 'passed');
@@ -281,6 +283,7 @@ function handleSocketEvent(event: SandboxInbound) {
   }
 
   if (type === 'message_blocked') {
+    sending.value = false;
     addSystemMessage('你的这条消息被安全层拦截，未送达对方。', 'blocked');
     return;
   }
@@ -312,16 +315,18 @@ function handleSocketEvent(event: SandboxInbound) {
   }
 
   if (type === 'error') {
+    sending.value = false;
     pageError.value = localizeRealtimeError(event.message);
     return;
   }
 
   if (type === 'peer_offline') {
-    pageError.value = '对方不在线';
+    isPeerOffline.value = true;
     return;
   }
 
   if (type === 'peer_online') {
+    isPeerOffline.value = false;
     if (pageError.value === '对方不在线') {
       pageError.value = '';
     }
@@ -422,6 +427,7 @@ async function sendMessage() {
 
     const text = content;
     inputText.value = '';
+    sending.value = true;
     if (wall.value.wallBroken) {
       socketRef.value.sendDirectMessage(id.value, text);
     } else {
@@ -520,9 +526,12 @@ onBeforeUnmount(() => {
     <section class="panel message-panel">
       <header class="panel-body" style="padding-bottom: 8px">
         <div class="row" style="justify-content: space-between">
-          <span class="badge badge-muted">共鸣值 {{ wall.resonanceScore }}</span>
+          <div>
+            <span class="badge badge-muted">共鸣值 {{ wall.resonanceScore }}</span>
+            <span v-if="isPeerOffline" class="badge" style="margin-left: 8px; background: rgba(255, 255, 255, 0.1); color: #f5a623">离线中</span>
+          </div>
           <span class="badge" :class="wall.wallBroken ? 'badge-success' : 'badge-accent'">
-            {{ wall.wallBroken ? '已破壁直聊' : 'AI 转述中' }}
+             {{ wall.wallBroken ? '已破壁直聊' : 'AI 转述中' }}
           </span>
         </div>
 
@@ -549,6 +558,10 @@ onBeforeUnmount(() => {
             <span class="original-label">你的原文：</span>{{ item.originalText }}
           </div>
           <div class="bubble-meta">{{ formatTime(item.time) }}</div>
+        </div>
+
+        <div v-if="sending" class="bubble system" style="opacity: 0.7; font-size: 12px; margin-top: 8px;">
+          <span class="loading-dots">正在发送...</span>
         </div>
       </div>
 

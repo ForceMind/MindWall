@@ -47,6 +47,12 @@ export class AdminConfigService {
       openaiEmbeddingModel: runtimeHasEmbeddingModel
         ? runtimeEmbeddingModel
         : envEmbeddingModel || 'text-embedding-3-small',
+      openaiInputPrice: typeof runtime.openai_input_price === 'number'
+        ? runtime.openai_input_price
+        : Number(process.env.OPENAI_INPUT_PRICE) || 0,
+      openaiOutputPrice: typeof runtime.openai_output_price === 'number'
+        ? runtime.openai_output_price
+        : Number(process.env.OPENAI_OUTPUT_PRICE) || 0,
       webOrigin: runtime.web_origin || process.env.WEB_ORIGIN || 'http://localhost:3001',
     };
   }
@@ -65,6 +71,8 @@ export class AdminConfigService {
       openai_embedding_api_key_preview: this.previewApiKey(embeddingKey),
       openai_model: ai.openaiModel,
       openai_embedding_model: ai.openaiEmbeddingModel,
+      openai_input_price: ai.openaiInputPrice,
+      openai_output_price: ai.openaiOutputPrice,
       web_origin: ai.webOrigin,
       source: {
         openai_base_url: runtime.openai_base_url
@@ -96,6 +104,22 @@ export class AdminConfigService {
         )
           ? 'runtime-config'
           : process.env.OPENAI_EMBEDDING_MODEL
+            ? 'env'
+            : 'default',
+        openai_input_price: Object.prototype.hasOwnProperty.call(
+          runtime,
+          'openai_input_price',
+        )
+          ? 'runtime-config'
+          : process.env.OPENAI_INPUT_PRICE
+            ? 'env'
+            : 'default',
+        openai_output_price: Object.prototype.hasOwnProperty.call(
+          runtime,
+          'openai_output_price',
+        )
+          ? 'runtime-config'
+          : process.env.OPENAI_OUTPUT_PRICE
             ? 'env'
             : 'default',
         web_origin: runtime.web_origin
@@ -131,6 +155,12 @@ export class AdminConfigService {
     }
     if (typeof input.openai_embedding_model === 'string') {
       next.openai_embedding_model = input.openai_embedding_model.trim();
+    }
+    if (typeof input.openai_input_price === 'number') {
+      next.openai_input_price = input.openai_input_price;
+    }
+    if (typeof input.openai_output_price === 'number') {
+      next.openai_output_price = input.openai_output_price;
     }
     if (typeof input.web_origin === 'string') {
       next.web_origin = input.web_origin.trim();

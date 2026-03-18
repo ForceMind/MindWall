@@ -39,6 +39,12 @@ export class AdminController {
     if (typeof body.openai_embedding_model === 'string') {
       payload.openai_embedding_model = body.openai_embedding_model;
     }
+    if (typeof body.openai_input_price === 'number') {
+      payload.openai_input_price = body.openai_input_price;
+    }
+    if (typeof body.openai_output_price === 'number') {
+      payload.openai_output_price = body.openai_output_price;
+    }
     if (typeof body.web_origin === 'string') {
       payload.web_origin = body.web_origin;
     }

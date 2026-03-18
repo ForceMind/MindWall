@@ -8,12 +8,14 @@ const props = withDefaults(
     title: string;
     subtitle?: string;
     showBack?: boolean;
+    hideHeader?: boolean;
     backTo?: string;
     compact?: boolean;
   }>(),
   {
     subtitle: '',
     showBack: false,
+    hideHeader: false,
     backTo: '',
     compact: false,
   },
@@ -43,7 +45,7 @@ async function handleLogout() {
 
 <template>
   <main class="screen" :style="compact ? 'max-width:780px;' : ''">
-    <header class="app-header">
+    <header v-if="!hideHeader" class="app-header">
       <div class="row" style="min-width: 0">
         <button
           v-if="showBack"
@@ -58,19 +60,6 @@ async function handleLogout() {
           <strong class="brand-title">{{ title }}</strong>
           <span v-if="subtitle" class="brand-subtitle">{{ subtitle }}</span>
         </div>
-      </div>
-
-      <div class="row-wrap" style="justify-content: flex-end">
-        <span class="badge badge-muted" v-if="canLogout">{{ userName }}</span>
-        <button
-          v-if="canLogout"
-          class="btn btn-ghost"
-          type="button"
-          style="padding: 6px 10px; border-radius: 10px"
-          @click="handleLogout"
-        >
-          退出
-        </button>
       </div>
     </header>
 

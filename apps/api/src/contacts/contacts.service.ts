@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PRESET_PERSONAS } from '../companion/personas';
 import { MatchStatus, UserTagType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -345,42 +346,20 @@ export class ContactsService {
       .slice(0, 2)
       .map((item) => item.tag_name);
 
-    const personas = [
-      {
-        id: 'ai_psychologist',
-        name: '心灵访谈师',
-        tags: ['心理倾听', '深度对话', ...seedTags],
-        summary: '基于你的访谈画像进行深度对话的 AI 陪伴者。',
+    // Pick 6 random personas out of the preset
+    const shuffled = [...PRESET_PERSONAS].sort(() => 0.5 - Math.random());
+    const aiCandidates = shuffled.slice(0, 6);
+
+    const personas = aiCandidates.map(p => {
+      const isPsych = p.id === 'ai_psychologist';
+      return {
+        id: isPsych ? p.id : `${p.id}_${Date.now()}_${Math.floor(Math.random()*1000)}`, // dynamic ID so they change!
+        name: isPsych ? p.name : this.generateDynamicName(userId || '', p.id, city || null),
+        tags: [...p.tags, ...seedTags].slice(0, 4),
+        summary: p.summary,
         disclosure: '匹配对象',
-      },
-      {
-        id: 'ai_reflective',
-        name: this.generateDynamicName(userId || '', 'ai_reflective', city || null),
-        tags: ['情绪共情', '慢节奏交流', ...seedTags],
-        summary: city
-          ? `同在${city}，偏向接住情绪、循序推进关系。`
-          : '偏向接住情绪、循序推进关系。',
-        disclosure: '匹配对象',
-      },
-      {
-        id: 'ai_boundary',
-        name: this.generateDynamicName(userId || '', 'ai_boundary', city || null),
-        tags: ['边界感', '关系观察', ...seedTags],
-        summary: city
-          ? `同在${city}，偏向清晰边界、稳定沟通。`
-          : '偏向清晰边界、稳定沟通。',
-        disclosure: '匹配对象',
-      },
-      {
-        id: 'ai_warm',
-        name: this.generateDynamicName(userId || '', 'ai_warm', city || null),
-        tags: ['温柔表达', '安全陪伴', ...seedTags],
-        summary: city
-          ? `同在${city}，偏向温和聊天与日常安抚。`
-          : '偏向温和聊天与日常安抚。',
-        disclosure: '匹配对象',
-      },
-    ];
+      };
+    });
 
     return personas.map((item, index) => ({
       candidate_id: item.id,

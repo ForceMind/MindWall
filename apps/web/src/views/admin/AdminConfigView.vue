@@ -27,6 +27,8 @@ const form = reactive({
   openai_embedding_api_key: '',
   openai_model: '',
   openai_embedding_model: '',
+  openai_input_price: 0,
+  openai_output_price: 0,
   web_origin: '',
 });
 
@@ -65,6 +67,8 @@ async function load() {
     form.openai_base_url = payload.openai_base_url || '';
     form.openai_model = payload.openai_model || '';
     form.openai_embedding_model = payload.openai_embedding_model || '';
+    form.openai_input_price = payload.openai_input_price || 0;
+    form.openai_output_price = payload.openai_output_price || 0;
     form.web_origin = payload.web_origin || '';
     form.openai_api_key = '';
     form.openai_embedding_api_key = '';
@@ -81,10 +85,12 @@ async function load() {
 }
 
 function buildPayload(includeWebOrigin: boolean) {
-  const payload: Record<string, string> = {
+  const payload: Record<string, any> = {
     openai_base_url: form.openai_base_url.trim(),
     openai_model: form.openai_model.trim(),
     openai_embedding_model: form.openai_embedding_model.trim(),
+    openai_input_price: Number(form.openai_input_price) || 0,
+    openai_output_price: Number(form.openai_output_price) || 0,
   };
 
   if (includeWebOrigin) {
@@ -178,6 +184,16 @@ onMounted(() => {
         </label>
 
         <label class="field">
+          <span class="field-label">输入价格 / 1M tokens</span>
+          <input v-model="form.openai_input_price" type="number" step="0.01" class="input" placeholder="0.15" />
+        </label>
+
+        <label class="field">
+          <span class="field-label">输出价格 / 1M tokens</span>
+          <input v-model="form.openai_output_price" type="number" step="0.01" class="input" placeholder="0.6" />
+        </label>
+
+        <label class="field">
           <span class="field-label">Embedding 模型名称（可选）</span>
           <input
             v-model="form.openai_embedding_model"
@@ -242,6 +258,8 @@ onMounted(() => {
           <span class="tag">聊天 Key：{{ configSource.openai_api_key || '-' }}</span>
           <span class="tag">Embedding Key：{{ configSource.openai_embedding_api_key || '-' }}</span>
           <span class="tag">聊天模型：{{ configSource.openai_model || '-' }}</span>
+          <span class="tag">输入价格：{{ configSource.openai_input_price || '-' }}</span>
+          <span class="tag">输出价格：{{ configSource.openai_output_price || '-' }}</span>
           <span class="tag">Embedding：{{ configSource.openai_embedding_model || '-' }}</span>
           <span class="tag">Web Origin：{{ configSource.web_origin || '-' }}</span>
         </div>

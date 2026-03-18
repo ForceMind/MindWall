@@ -9,6 +9,7 @@ const OnboardingProfileView = () => import('@/views/user/OnboardingProfileView.v
 const OnboardingInterviewView = () => import('@/views/user/OnboardingInterviewView.vue');
 const OnboardingCityView = () => import('@/views/user/OnboardingCityView.vue');
 const MatchListView = () => import('@/views/user/MatchListView.vue');
+const UserProfileView = () => import('@/views/user/UserProfileView.vue');
 const ChatRoomView = () => import('@/views/user/ChatRoomView.vue');
 
 const AdminLoginView = () => import('@/views/admin/AdminLoginView.vue');
@@ -59,6 +60,7 @@ const router = createRouter({
     { path: '/onboarding/interview', component: OnboardingInterviewView, meta: { requiresUser: true } },
     { path: '/onboarding/city', component: OnboardingCityView, meta: { requiresUser: true } },
     { path: '/matches', component: MatchListView, meta: { requiresUser: true } },
+    { path: '/profile', component: UserProfileView, meta: { requiresUser: true } },
     { path: '/chat/:kind/:id', component: ChatRoomView, meta: { requiresUser: true } },
 
     { path: '/admin/login', component: AdminLoginView, meta: { adminPublic: true } },
