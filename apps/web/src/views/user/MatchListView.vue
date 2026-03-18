@@ -35,30 +35,37 @@ const profileName = computed(
 );
 const profileAvatar = computed(() => userStore.viewer?.profile?.anonymous_avatar || '');
 
-const AI_PERSONA_IDS = ['ai_psychologist', 'ai_reflective', 'ai_boundary', 'ai_warm'];
-
 function getCachedPersonaName(personaId: string): string {
-  return localStorage.getItem(`mindwall.ai.persona.${personaId}.name`) || '匿名用户';
+  const uid = userStore.viewer?.user.id || 'guest';
+  return localStorage.getItem(`mindwall.ai.persona.${uid}.${personaId}.name`) || '匿名用户';
 }
 
 function cachePersonaNames(candidateList: CandidateContact[]) {
+  const uid = userStore.viewer?.user.id || 'guest';
   for (const c of candidateList) {
     if (c.candidate_type === 'ai' && c.name) {
-      localStorage.setItem(`mindwall.ai.persona.${c.candidate_id}.name`, c.name);
+      localStorage.setItem(`mindwall.ai.persona.${uid}.${c.candidate_id}.name`, c.name);
     }
   }
 }
 
 function getAiSessionsFromLocal(): ContactSession[] {
+  const uid = userStore.viewer?.user.id || 'guest';
+  const prefix = `mindwall.ai.chat.${uid}.`;
   const sessions: ContactSession[] = [];
-  for (const key of AI_PERSONA_IDS) {
-    const storageKey = `mindwall.ai.chat.${key}`;
+  
+  for (let i = 0; i < localStorage.length; i++) {
+    const storageKey = localStorage.key(i);
+    if (!storageKey || !storageKey.startsWith(prefix)) continue;
+    
+    const key = storageKey.slice(prefix.length);
     const raw = localStorage.getItem(storageKey);
     if (!raw) continue;
     try {
       const msgs = JSON.parse(raw);
       if (!Array.isArray(msgs) || msgs.length === 0) continue;
       const last = msgs[msgs.length - 1];
+      const hasWallBroken = msgs.some((m: any) => m.kind === 'system' && m.systemType === 'wall-broken');
       sessions.push({
         match_id: key,
         counterpart_user_id: key,
@@ -67,7 +74,7 @@ function getAiSessionsFromLocal(): ContactSession[] {
         name: getCachedPersonaName(key),
         avatar: null,
         city: null,
-        status: 'wall_broken',
+        status: hasWallBroken ? 'wall_broken' : 'active_sandbox', 
         resonance_score: 0,
         ai_match_reason: null,
         updated_at: last.time || new Date().toISOString(),
@@ -116,7 +123,7 @@ async function loadData(isRefresh = false) {
 }
 
 function openMatch(matchId: string) {
-  if (AI_PERSONA_IDS.includes(matchId)) {
+  if (matchId.startsWith('ai_')) {
     router.push(`/chat/ai/${matchId}`);
     return;
   }

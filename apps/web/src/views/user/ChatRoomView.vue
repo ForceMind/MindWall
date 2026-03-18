@@ -61,7 +61,8 @@ const isMatchChat = computed(() => kind.value === 'match');
 const canBreakWall = computed(() => isMatchChat.value && wall.value.wallReady && !wall.value.wallBroken);
 
 function aiHistoryKey() {
-  return `mindwall.ai.chat.${id.value}`;
+  const uid = userStore.viewer?.user.id || 'guest';
+  return `mindwall.ai.chat.${uid}.${id.value}`;
 }
 
 function localizeRealtimeError(input: unknown) {
@@ -382,12 +383,29 @@ async function initMatchChat() {
 }
 
 async function initAiChat() {
-    title.value = localStorage.getItem(`mindwall.ai.persona.${id.value}.name`) || '匿名会话';
-    wall.value.wallBroken = true;
-    wall.value.status = 'wall_broken';
+    const uid = userStore.viewer?.user.id || 'guest';
+    title.value = localStorage.getItem(`mindwall.ai.persona.${uid}.${id.value}.name`) || '匿名会话';
+    
+    const hasWallBroken = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-broken');
+    if (hasWallBroken) {
+      wall.value.wallBroken = true;
+      wall.value.status = 'wall_broken';
+    } else {
+      wall.value.wallBroken = false;
+      wall.value.status = 'active_sandbox';
+      
+      const myMsgs = messages.value.filter(m => m.mine).length;
+      const hasWallReady = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-ready');
+      if (myMsgs >= 3 && !hasWallReady) {
+         wall.value.wallReady = true;
+         addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
+      } else if (hasWallReady && !hasWallBroken) {
+         wall.value.wallReady = true;
+      }
+    }
 
   if (messages.value.length === 0) {
-    addSystemMessage('你们已建立匿名连接，请从一句真诚的话开始。', 'init');
+    addSystemMessage('你们已建立匿名连接，为了安全初始将在沙盒中交流，内容可能由AI转述。', 'init');
   }
 }
 
@@ -455,8 +473,15 @@ async function sendMessage() {
       mine: false,
       kind: 'text',
       time: new Date().toISOString(),
-    });
-    saveAiHistory();
+    });    
+    // Evaluate if AI sandbox chat can be broken
+    const myMsgs = messages.value.filter(m => m.mine).length;
+    const hasWallReady = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-ready');
+    if (!wall.value.wallBroken && myMsgs >= 3 && !hasWallReady) {
+      wall.value.wallReady = true;
+      addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
+    }
+        saveAiHistory();
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -465,7 +490,20 @@ async function sendMessage() {
 }
 
 async function submitWallDecision(accept: boolean) {
-  if (!socketRef.value || !isMatchChat.value) {
+  if (!isMatchChat.value) {
+    if (accept) {
+      wall.value.wallBroken = true;
+      wall.value.status = 'wall_broken';
+      wall.value.wallReady = false;
+      addSystemMessage('破壁已完成，后续消息不再改写。', 'wall-broken');
+      saveAiHistory();
+      noticeStore.show('已同意破壁，对方(AI)亦同意。', 'success');
+    } else {
+      noticeStore.show('已提交暂不破壁', 'info');
+    }
+    return;
+  }
+  if (!socketRef.value) {
     return;
   }
   socketRef.value.sendWallDecision(id.value, accept);

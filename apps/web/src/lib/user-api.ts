@@ -143,7 +143,7 @@ export function saveOnboardingProfile(
   });
 }
 
-export function startOnboardingSession(token: string) {
+export function startOnboardingSession(token: string, type: 'onboarding' | 'deep' = 'onboarding') {
   return httpRequest<{
     status: 'in_progress';
     session_id: string;
@@ -153,11 +153,11 @@ export function startOnboardingSession(token: string) {
   }>('/onboarding/me/session', {
     method: 'POST',
     token,
-    body: {},
+    body: JSON.stringify({ type }),
   });
 }
 
-export function sendOnboardingMessage(token: string, sessionId: string, message: string) {
+export function sendOnboardingMessage(token: string, sessionId: string, message: string, skip?: boolean) {
   return httpRequest<
     | {
         status: 'in_progress';

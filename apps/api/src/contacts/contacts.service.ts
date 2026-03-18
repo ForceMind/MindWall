@@ -348,7 +348,8 @@ export class ContactsService {
 
     // Pick 6 random personas out of the preset
     const shuffled = [...PRESET_PERSONAS].sort(() => 0.5 - Math.random());
-    const aiCandidates = shuffled.slice(0, 6);
+    const aiCount = Math.floor(Math.random() * 3) + 1;
+    const aiCandidates = shuffled.slice(0, aiCount);
 
     const personas = aiCandidates.map(p => {
       const isPsych = p.id === 'ai_psychologist';

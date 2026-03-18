@@ -23,7 +23,11 @@ const age = ref(userStore.viewer?.profile?.age ? String(userStore.viewer.profile
 const loading = ref(false);
 const pageError = ref('');
 
-async function submit() {
+const showConfirm = ref(false);
+const computedYear = ref(0);
+const computedMonth = ref(0);
+
+function previewSubmit() {
   pageError.value = '';
   if (!selectedGender.value) {
     pageError.value = '请选择性别。';
@@ -32,6 +36,27 @@ async function submit() {
   const numericAge = Number(age.value);
   if (!Number.isFinite(numericAge) || numericAge < 18 || numericAge > 99) {
     pageError.value = '年龄需要在 18 到 99 之间。';
+    return;
+  }
+  
+  const now = new Date();
+  computedYear.value = now.getFullYear() - numericAge;
+  computedMonth.value = now.getMonth() + 1;
+  showConfirm.value = true;
+}
+
+async function submit() {
+  pageError.value = '';
+  
+  const now = new Date();
+  let finalAge = now.getFullYear() - computedYear.value;
+  // If the user's birth month hasn't occurred this year, they are 1 year younger
+  if (now.getMonth() + 1 < computedMonth.value) {
+    finalAge -= 1;
+  }
+
+  if (!Number.isFinite(finalAge) || finalAge < 18 || finalAge > 99) {
+    pageError.value = '计算出的年龄超出范围(18-99)。';
     return;
   }
 
@@ -44,7 +69,7 @@ async function submit() {
   try {
     await saveOnboardingProfile(userStore.token, {
       gender: selectedGender.value,
-      age: Math.round(numericAge),
+      age: Math.round(finalAge),
     });
     await userStore.refreshViewer();
     noticeStore.show('基础资料已保存', 'success');
@@ -90,15 +115,40 @@ async function submit() {
 
         <label class="field">
           <span class="field-label">你的年龄</span>
+          <div class="muted" style="margin-top: 2px; margin-bottom: 8px; font-size: 13px;">请仔细填写，注册后性别与年龄将不可修改</div>
           <input v-model="age" class="input" type="number" min="18" max="99" placeholder="例如 24" />
         </label>
 
         <p v-if="pageError" class="badge badge-danger" style="justify-content: flex-start">{{ pageError }}</p>
 
-        <button class="btn btn-primary btn-block" type="button" :disabled="loading" @click="submit">
+        <button class="btn btn-primary btn-block" type="button" :disabled="loading" @click="previewSubmit">
           {{ loading ? '保存中...' : '下一步：进入访谈' }}
         </button>
       </div>
     </section>
+
+    <!-- Age Verification Modal -->
+    <div v-if="showConfirm" class="modal-overlay" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+      <div class="panel" style="width: 300px; padding: 20px;">
+        <h3 style="margin-bottom: 16px;">请确认出生年月</h3>
+        <p class="muted" style="margin-bottom: 16px; font-size: 14px;">一旦确认后，性别与年龄将不可修改。</p>
+        
+        <label class="field">
+          <span class="field-label">出生年份</span>
+          <input v-model.number="computedYear" type="number" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">出生月份</span>
+          <input v-model.number="computedMonth" type="number" class="input" min="1" max="12" />
+        </label>
+
+        <div class="row" style="margin-top: 24px; gap: 12px; justify-content: flex-end;">
+          <button class="btn btn-ghost" type="button" @click="showConfirm = false">取消</button>
+          <button class="btn btn-primary" type="button" @click="() => { showConfirm = false; submit(); }" :disabled="loading">
+            确认并继续
+          </button>
+        </div>
+      </div>
+    </div>
   </UserShell>
 </template>

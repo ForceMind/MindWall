@@ -15,10 +15,12 @@ import { ServerLogService } from '../telemetry/server-log.service';
 interface StartSessionBody {
   auth_provider_id?: string;
   city?: string;
+  type?: 'onboarding' | 'deep';
 }
 
 interface SendMessageBody {
   message?: string;
+  skip?: boolean;
 }
 
 interface SaveBasicsBody {
@@ -62,7 +64,7 @@ interface TagExtractionResult {
 export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
   private readonly sessions = new Map<string, OnboardingSession>();
-  private readonly totalQuestions = 4;
+  // private readonly totalQuestions = 4;
   private readonly maxInvalidAttempts = 5;
   private readonly warnAtAttempt = 4;
   private readonly anonymousPrefix = [
@@ -200,7 +202,7 @@ export class OnboardingService {
       select: { id: true },
     });
 
-    return this.initializeSession(user.id, city);
+    return this.initializeSession(user.id, city, body.type);
   }
 
   async startSessionForUser(
@@ -263,7 +265,7 @@ export class OnboardingService {
       });
     }
 
-    return this.initializeSession(userId, body.city?.trim() || null);
+    return this.initializeSession(userId, body.city?.trim() || null, body.type);
   }
 
   async submitMessageForUser(
@@ -336,7 +338,7 @@ export class OnboardingService {
     };
   }
 
-  private async initializeSession(userId: string, city: string | null) {
+  private async initializeSession(userId: string, city: string | null, type: 'onboarding' | 'deep' = 'onboarding') {
     const sessionId = randomUUID();
 
     await this.prisma.userProfile.upsert({
@@ -363,18 +365,18 @@ export class OnboardingService {
         user_id: userId,
         status: 'in_progress',
         answer_count: 0,
-        total_questions: this.totalQuestions,
+        total_questions: type === 'deep' ? 8 : 2,
         invalid_attempt_count: 0,
       },
     });
 
-    const firstQuestion = await this.generateQuestion([], 0, userId);
+    const firstQuestion = await this.generateQuestion([], 0, type === 'deep' ? 8 : 2, userId);
     const session: OnboardingSession = {
       sessionId,
       userId,
       turns: [],
       answerCount: 0,
-      totalQuestions: this.totalQuestions,
+      totalQuestions: type === 'deep' ? 8 : 2,
     };
 
     this.sessions.set(sessionId, session);
@@ -391,7 +393,7 @@ export class OnboardingService {
       user_id: userId,
       city,
       assistant_message: firstQuestion,
-      remaining_questions: this.totalQuestions,
+      remaining_questions: type === 'deep' ? 8 : 2,
       turns: session.turns,
     };
   }
@@ -401,13 +403,14 @@ export class OnboardingService {
     session: OnboardingSession,
     body: SendMessageBody,
   ) {
-    const message = body.message?.trim();
+    const isSkip = body.skip === true;
+    const message = isSkip ? '这题跳过，问下一个问题吧。' : body.message?.trim();
     if (!message) {
       throw new BadRequestException('message is required.');
     }
 
     // AI input validation
-    const validation = await this.validateUserInput(message, session.userId);
+    const validation = isSkip ? { valid: true } : await this.validateUserInput(message, session.userId);
     if (!validation.valid) {
       // Increment invalid attempt count
       const dbSession = await this.prisma.onboardingInterviewSession.findUnique({
@@ -463,6 +466,7 @@ export class OnboardingService {
       const nextQuestion = await this.generateQuestion(
         session.turns,
         session.answerCount,
+        session.totalQuestions,
         session.userId,
       );
       await this.appendTurn(session, 'assistant', nextQuestion);
@@ -592,6 +596,7 @@ export class OnboardingService {
   private async generateQuestion(
     turns: InterviewTurn[],
     turnIndex: number,
+    totalQuestions: number,
     userId?: string,
   ) {
     const previousQuestions = this.getPreviousAssistantQuestions(turns);
@@ -648,7 +653,7 @@ export class OnboardingService {
     const prompt = [
       promptTemplate,
       hardConstraints,
-      `Current turn: ${turnIndex + 1} / ${this.totalQuestions}`,
+      `Current turn: ${turnIndex + 1} / ${totalQuestions}`,
       `Current focus: ${focus}`,
       `Latest user answer: ${latestUserAnswer || '(none)'}`,
       'Previous assistant questions:',

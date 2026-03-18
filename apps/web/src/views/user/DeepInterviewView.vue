@@ -1,0 +1,295 @@
+<script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import UserShell from '@/components/UserShell.vue';
+import { startOnboardingSession, sendOnboardingMessage, skipOnboardingSession, type PublicTag } from '@/lib/user-api';
+import { toErrorMessage } from '@/lib/api-error';
+import { useNoticeStore } from '@/stores/notice';
+import { useUserSessionStore } from '@/stores/user-session';
+
+interface Turn {
+  role: 'assistant' | 'user';
+  text: string;
+}
+
+const router = useRouter();
+const userStore = useUserSessionStore();
+const noticeStore = useNoticeStore();
+
+const loading = ref(false);
+const sending = ref(false);
+const pageError = ref('');
+const sessionId = ref('');
+const turns = ref<Turn[]>([]);
+const answer = ref('');
+const done = ref(false);
+const analyzing = ref(false);
+const analyzeHint = ref('');
+const summary = ref('');
+const tags = ref<PublicTag[]>([]);
+const chatBoxRef = ref<HTMLElement | null>(null);
+const inputWarning = ref('');
+const turnsCollapsed = ref(false);
+const skipping = ref(false);
+const skippingQuestion = ref(false);
+
+async function bootstrapSession() {
+  if (!userStore.token) {
+    router.replace('/login');
+    return;
+  }
+
+  loading.value = true;
+  pageError.value = '';
+  inputWarning.value = '';
+  try {
+    const payload = await startOnboardingSession(userStore.token, 'deep');
+    sessionId.value = payload.session_id;
+    // Restore turns from server (supports reconnection)
+    if (payload.turns && payload.turns.length > 0) {
+      turns.value = payload.turns.map((t: { role: string; content: string }) => ({
+        role: t.role as 'assistant' | 'user',
+        text: t.content,
+      }));
+    } else {
+      turns.value = [{ role: 'assistant', text: payload.assistant_message }];
+    }
+    done.value = false;
+    analyzing.value = false;
+    analyzeHint.value = '';
+    turnsCollapsed.value = false;
+    summary.value = '';
+    tags.value = [];
+    await nextTick();
+    scrollToBottom();
+  } catch (error) {
+    pageError.value = toErrorMessage(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function submitAnswer() {
+  const message = answer.value.trim();
+  if (!message || !sessionId.value || !userStore.token || sending.value) {
+    return;
+  }
+
+  sending.value = true;
+  pageError.value = '';
+  inputWarning.value = '';
+  turns.value.push({ role: 'user', text: message });
+  answer.value = '';
+  await nextTick();
+  scrollToBottom();
+
+  try {
+    const payload = await sendOnboardingMessage(userStore.token, sessionId.value, message) as Record<string, unknown>;
+
+    if (payload.status === 'invalid_input') {
+      // Remove the last user message since it was rejected
+      turns.value.pop();
+      inputWarning.value = String(payload.warning || '请输入有效内容');
+      if (Number(payload.remaining_before_ban || 99) <= 0) {
+        await userStore.refreshViewer();
+        router.replace('/restricted');
+      }
+      return;
+    }
+
+    if (payload.status === 'in_progress') {
+      turns.value.push({ role: 'assistant', text: String(payload.assistant_message) });
+      await nextTick();
+      scrollToBottom();
+      return;
+    }
+
+    // Last answer accepted — enter analyzing phase
+    sending.value = false;
+    turnsCollapsed.value = true;
+    analyzing.value = true;
+
+    const hints = [
+      'AI 正在理解你的表达...',
+      '正在生成你的心理画像...',
+      '几乎完成了...',
+    ];
+    analyzeHint.value = hints[0];
+    let hintIndex = 1;
+    const hintTimer = setInterval(() => {
+      if (hintIndex < hints.length) {
+        analyzeHint.value = hints[hintIndex];
+        hintIndex++;
+      }
+    }, 1800);
+
+    // Small delay so user can see the loading animation
+    await new Promise((r) => setTimeout(r, hints.length * 1800 + 500));
+    clearInterval(hintTimer);
+    analyzing.value = false;
+
+    done.value = true;
+    summary.value = String(payload.onboarding_summary || '');
+    tags.value = (payload.public_tags || []) as PublicTag[];
+    await userStore.refreshViewer();
+    noticeStore.show('访谈完成，已生成画像', 'success');
+  } catch (error) {
+    pageError.value = toErrorMessage(error);
+  } finally {
+    sending.value = false;
+  }
+}
+
+function scrollToBottom() {
+  if (!chatBoxRef.value) {
+    return;
+  }
+  chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
+}
+
+async function skipInterview() {
+  if (!sessionId.value || !userStore.token || skipping.value) return;
+
+  skipping.value = true;
+  pageError.value = '';
+  try {
+    turnsCollapsed.value = true;
+    analyzing.value = true;
+    analyzeHint.value = '正在生成你的画像...';
+
+    const payload = await skipOnboardingSession(userStore.token, sessionId.value);
+    await new Promise((r) => setTimeout(r, 1500));
+    analyzing.value = false;
+
+    done.value = true;
+    summary.value = String(payload.onboarding_summary || '');
+    tags.value = (payload.public_tags || []) as PublicTag[];
+    await userStore.refreshViewer();
+    noticeStore.show('访谈已跳过，已生成基础画像', 'success');
+  } catch (error) {
+    analyzing.value = false;
+    turnsCollapsed.value = false;
+    pageError.value = toErrorMessage(error);
+  } finally {
+    skipping.value = false;
+  }
+}
+
+function handleViewportResize() {
+  scrollToBottom();
+}
+
+function goCityStep() {
+  router.push('/onboarding/city');
+}
+
+function goReturn() {
+  router.push('/profile');
+}
+
+onMounted(() => {
+  bootstrapSession();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', handleViewportResize);
+  }
+});
+</script>
+
+<template>
+  <UserShell title="深度访谈" subtitle="重新生成你的画像" compact>
+
+    <section class="panel message-panel">
+      <header class="panel-body" style="padding-bottom: 8px; display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <h2 class="panel-title">请认真回答几个问题</h2>
+          <p class="panel-subtitle">回答越真实，匹配越准确。系统会根据你的表达生成公开标签与隐藏画像。</p>
+        </div>
+        <button class="btn btn-ghost" type="button" @click="goReturn" style="font-size: 13px; color: #666; white-space: nowrap">暂时离开</button>
+      </header>
+
+      <div ref="chatBoxRef" class="message-list" style="padding: 0 16px 10px">
+        <template v-if="turnsCollapsed && !done">
+          <div class="bubble system" style="text-align: center; opacity: 0.6">
+            访谈已完成（共 {{ turns.filter(t => t.role === 'user').length }} 轮对话）
+          </div>
+        </template>
+        <template v-else-if="!turnsCollapsed">
+          <div v-for="(item, index) in turns" :key="index" class="bubble" :class="item.role === 'user' ? 'me' : ''">
+            <div>{{ item.text }}</div>
+          </div>
+        </template>
+
+        <div v-if="analyzing" class="bubble system" style="text-align: center">
+          <div style="margin-bottom: 6px">{{ analyzeHint }}</div>
+          <div class="loading-dots"><span>·</span><span>·</span><span>·</span></div>
+        </div>
+
+        <div v-if="loading" class="bubble system">正在初始化访谈...</div>
+        <div v-if="pageError" class="bubble system" style="color: #a13553">{{ pageError }}</div>
+        <div v-if="inputWarning" class="bubble system" style="color: #c44d1a; border-color: rgba(240, 160, 48, 0.4); background: rgba(240, 160, 48, 0.12)">
+          ⚠ {{ inputWarning }}
+        </div>
+      </div>
+
+      <footer class="panel-body" style="padding-top: 8px">
+        <div v-if="!done && !analyzing" class="composer">
+          <textarea
+            v-model="answer"
+            class="textarea"
+            placeholder="输入你的回答..."
+            :disabled="loading || sending"
+            @keydown.enter.exact.prevent="submitAnswer"
+          />
+          <div class="row" style="gap: 8px">
+            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skipping" @click="skipInterview" style="font-size: 13px; white-space: nowrap">
+              提前结束
+            </button>
+            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skippingQuestion" @click="skipCurrentQuestion" style="font-size: 13px; white-space: nowrap">
+              跳过此题
+            </button>
+            <button class="btn btn-primary" type="button" :disabled="loading || sending || !answer.trim()" @click="submitAnswer">
+              {{ sending ? '发送中' : '发送' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="column">
+          <div class="panel" style="box-shadow: none">
+            <div class="panel-body" style="padding: 12px">
+              <strong>访谈摘要</strong>
+              <p class="panel-subtitle" style="margin-top: 8px">{{ summary }}</p>
+              <div class="tag-list" style="margin-top: 10px">
+                <span v-for="tag in tags" :key="tag.tag_name" class="tag">{{ tag.tag_name }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row-wrap">
+            <button class="btn btn-ghost" type="button" @click="bootstrapSession">重新访谈</button>
+            <button class="btn btn-primary" type="button" @click="goReturn">完成返回</button>
+          </div>
+        </div>
+      </footer>
+    </section>
+  </UserShell>
+</template>
+
+<style scoped>
+.loading-dots span {
+  display: inline-block;
+  font-size: 28px;
+  animation: dotPulse 1.2s infinite;
+}
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotPulse {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+</style>
