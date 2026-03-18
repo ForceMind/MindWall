@@ -381,7 +381,7 @@ async function initAiChat() {
       } else {
          actualPersonaId.value = id.value;
          aiSessionId.value = '';
-         title.value = '匹配对象 (AI)';
+         title.value = '匹配对象';
       }
     } catch (err) {
       console.error(err);
@@ -513,7 +513,7 @@ async function submitWallDecision(accept: boolean) {
       wall.value.wallReady = false;
       addSystemMessage('破壁已完成，后续消息不再改写。', 'wall-broken');
       saveAiHistory();
-      noticeStore.show('已同意破壁，对方(AI)亦同意。', 'success');
+      noticeStore.show('已同意破壁，对方也已同意。', 'success');
     } else {
       noticeStore.show('已提交暂不破壁', 'info');
     }
@@ -585,7 +585,7 @@ onBeforeUnmount(() => {
             <span v-if="isPeerOffline" class="badge" style="margin-left: 8px; background: rgba(255, 255, 255, 0.1); color: #f5a623">离线中</span>
           </div>
           <span class="badge" :class="wall.wallBroken ? 'badge-success' : 'badge-accent'">
-             {{ wall.wallBroken ? '已破壁直聊' : 'AI 转述中' }}
+             {{ wall.wallBroken ? '已破壁直聊' : '匿名交流中' }}
           </span>
         </div>
 
