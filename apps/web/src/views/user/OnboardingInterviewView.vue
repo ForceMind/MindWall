@@ -78,6 +78,13 @@ async function submitAnswer() {
   inputWarning.value = '';
   turns.value.push({ role: 'user', text: message });
   answer.value = '';
+  
+  if (turns.value.filter(t => t.role === 'user').length === 4) {
+    turnsCollapsed.value = true;
+    analyzing.value = true;
+    analyzeHint.value = 'AI 正在理解你的表达...';
+  }
+
   await nextTick();
   scrollToBottom();
 
@@ -87,6 +94,8 @@ async function submitAnswer() {
     if (payload.status === 'invalid_input') {
       // Remove the last user message since it was rejected
       turns.value.pop();
+      turnsCollapsed.value = false;
+      analyzing.value = false;
       inputWarning.value = String(payload.warning || '请输入有效内容');
       if (Number(payload.remaining_before_ban || 99) <= 0) {
         await userStore.refreshViewer();
@@ -236,8 +245,8 @@ onBeforeUnmount(() => {
 
     <section class="panel message-panel">
       <header class="panel-body" style="padding-bottom: 8px">
-        <h2 class="panel-title">请认真回答 4 个问题</h2>
-        <p class="panel-subtitle">回答越真实，匹配越准确。系统会根据你的表达生成公开标签与隐藏画像。</p>
+        <h2 class="panel-title">{{ done ? '匹配画像已生成' : analyzing ? '正在生成画像' : '请认真回答 4 个问题' }}</h2>
+        <p v-if="!done && !analyzing" class="panel-subtitle">回答越真实，匹配越准确。系统会根据你的表达生成公开标签与隐藏画像。</p>
       </header>
 
       <div ref="chatBoxRef" class="message-list" style="padding: 0 16px 10px">

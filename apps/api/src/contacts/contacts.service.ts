@@ -38,12 +38,20 @@ export class ContactsService {
       };
     }
 
+    const onlineCutoff = new Date(Date.now() - 1000 * 60 * 15);
     const users = await this.prisma.user.findMany({
       where: {
         id: { not: userId },
         status: 'active',
         profile: {
           is: { city },
+        },
+        sessions: {
+          some: {
+            last_seen_at: { gt: onlineCutoff },
+            revoked_at: null,
+            expires_at: { gt: new Date() }
+          }
         },
       },
       take: 120,

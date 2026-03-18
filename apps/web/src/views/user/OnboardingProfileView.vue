@@ -151,11 +151,15 @@ async function submit() {
         
         <label class="field">
           <span class="field-label">出生年份</span>
-          <input v-model.number="computedYear" type="number" class="input" />
+          <select v-model.number="computedYear" class="input">
+            <option v-for="y in 100" :key="y" :value="new Date().getFullYear() - y + 1">{{ new Date().getFullYear() - y + 1 }}</option>
+          </select>
         </label>
         <label class="field">
           <span class="field-label">出生月份</span>
-          <input v-model.number="computedMonth" type="number" class="input" min="1" max="12" />
+          <select v-model.number="computedMonth" class="input">
+            <option v-for="m in 12" :key="m" :value="m">{{ m }}</option>
+          </select>
         </label>
 
         <p v-if="modalError" class="badge badge-danger" style="margin-top: 8px; justify-content: flex-start">{{ modalError }}</p>

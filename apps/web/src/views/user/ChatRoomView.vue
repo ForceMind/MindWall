@@ -257,15 +257,28 @@ function handleSocketEvent(event: SandboxInbound) {
     const rewrittenText = String(event.text || '');
     const aiAction = String(event.ai_action || 'passed');
     const isRewritten = aiAction === 'modified' || (originalText && rewrittenText !== originalText);
-    pushMessage({
-      id: String(event.message_id || `mine-${Date.now()}`),
-      text: rewrittenText,
-      originalText: isRewritten ? originalText : undefined,
-      mine: true,
-      kind: isRewritten ? 'ai-relay' : 'text',
-      time: String(event.created_at || new Date().toISOString()),
-      aiAction,
-    });
+
+    const pendingIndex = messages.value.findLastIndex(m => m.mine && m.id.startsWith('pending-') && m.text === originalText);
+    
+    if (pendingIndex !== -1) {
+      const existing = messages.value[pendingIndex];
+      existing.id = String(event.message_id || existing.id);
+      existing.text = rewrittenText;
+      existing.originalText = isRewritten ? originalText : undefined;
+      existing.kind = isRewritten ? 'ai-relay' : 'text';
+      existing.aiAction = aiAction;
+      existing.time = String(event.created_at || new Date().toISOString());
+    } else {
+      pushMessage({
+        id: String(event.message_id || `mine-${Date.now()}`),
+        text: rewrittenText,
+        originalText: isRewritten ? originalText : undefined,
+        mine: true,
+        kind: isRewritten ? 'ai-relay' : 'text',
+        time: String(event.created_at || new Date().toISOString()),
+        aiAction,
+      });
+    }
     return;
   }
 
@@ -445,7 +458,15 @@ async function sendMessage() {
 
     const text = content;
     inputText.value = '';
-    sending.value = true;
+    
+    pushMessage({
+      id: `pending-${Date.now()}`,
+      text: text,
+      mine: true,
+      kind: 'text',
+      time: new Date().toISOString()
+    });
+
     if (wall.value.wallBroken) {
       socketRef.value.sendDirectMessage(id.value, text);
     } else {

@@ -127,7 +127,7 @@ router.beforeEach(async (to) => {
 
     if (route === '/matches' && isOnboardingPath) {
       // Allow active users to revisit interview for deep interview
-      if (to.path === '/onboarding/interview') {
+      if (to.path === '/onboarding/interview' || to.path === '/onboarding/deep') {
         return true;
       }
       return '/matches';
