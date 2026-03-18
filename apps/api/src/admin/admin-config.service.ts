@@ -249,7 +249,7 @@ export class AdminConfigService {
           messages: [
             {
               role: 'system',
-              content: '你是 MindWall 的接口连通性测试助手。',
+              content: '你是 有间 的接口连通性测试助手。',
             },
             {
               role: 'user',
@@ -297,7 +297,7 @@ export class AdminConfigService {
           headers: embeddingHeaders,
           body: JSON.stringify({
             model: ai.openaiEmbeddingModel,
-            input: 'MindWall API connectivity check',
+            input: '有间 API connectivity check',
           }),
         });
 

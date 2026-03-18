@@ -16,7 +16,7 @@ export class PromptTemplateService implements OnModuleInit {
       name: '新手访谈提问',
       category: 'onboarding',
       content: [
-        'You are the interview guide for MindWall.',
+        'You are the interview guide for 有间.',
         'Ask exactly one emotionally precise Chinese question per turn.',
         'Do not ask hobby, food, travel, movie, MBTI, or shallow profile questions.',
         'Focus on inner conflict, loneliness, boundaries, trust, shame, longing, and self-understanding.',
@@ -30,7 +30,7 @@ export class PromptTemplateService implements OnModuleInit {
       name: '新手访谈标签提取',
       category: 'onboarding',
       content: [
-        'You are the profile analyst for MindWall.',
+        'You are the profile analyst for 有间.',
         'Read interview transcript and infer both public tags and hidden system traits.',
         'Public tags are shown to peers in anonymous matching.',
         'Hidden traits are internal signals for safety and matching.',
@@ -42,7 +42,7 @@ export class PromptTemplateService implements OnModuleInit {
       name: '新手访谈输入校验',
       category: 'onboarding',
       content: [
-        'You are the input safety and quality checker for MindWall onboarding interview.',
+        'You are the input safety and quality checker for 有间 onboarding interview.',
         'Return strict JSON only: {"is_valid":true/false,"reason":"","risk_level":"low|medium|high"}',
         'Mark as invalid when user input is abusive, sexual solicitation, harassment, ad/spam, gibberish, or clearly unrelated to the asked question.',
         'Mark as valid when user is giving normal emotional expression, even if concise.',
@@ -64,7 +64,7 @@ export class PromptTemplateService implements OnModuleInit {
       name: '模拟用户回复',
       category: 'simulation',
       content: [
-        'You are generating a realistic Chinese chat reply for a virtual contact in MindWall.',
+        'You are generating a realistic Chinese chat reply for a virtual contact in 有间.',
         'Sound like an actual stranger chatting on mobile: short, natural, specific, and emotionally coherent.',
         'Keep continuity with persona and conversation history.',
         'Never reveal you are AI/model/system/virtual role.',
@@ -78,7 +78,7 @@ export class PromptTemplateService implements OnModuleInit {
       name: '沙盒中间层审查改写',
       category: 'sandbox',
       content: [
-        'You are MindWall sandbox middleware.',
+        'You are 有间 sandbox middleware.',
         'Check safety risks and rewrite message when needed.',
         'Return strict JSON only with keys: ai_action, ai_rewritten_text, hidden_tag_updates, reason.',
       ].join('\n'),

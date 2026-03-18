@@ -28,7 +28,7 @@ project_version() {
 
 usage() {
   cat <<'EOF'
-MindWall 更新脚本
+有间 更新脚本
 
 用法:
   sudo bash update.sh [选项]
@@ -70,7 +70,7 @@ for arg in "$@"; do
   FORWARD_ARGS+=("$arg")
 done
 
-echo -e "${CYAN}${BOLD}MindWall 更新脚本${NC} v$(project_version)"
+echo -e "${CYAN}${BOLD}有间 更新脚本${NC} v$(project_version)"
 echo "目录: $ROOT_DIR"
 
 if [[ "$FULL_MODE" == "1" ]]; then

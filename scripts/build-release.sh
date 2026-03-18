@@ -69,7 +69,7 @@ INCLUDE_LIST=(
   "apps/web/public"
 )
 
-echo "开始生成 MindWall 最小发布包 v$VERSION_VALUE"
+echo "开始生成 有间 最小发布包 v$VERSION_VALUE"
 mkdir -p "$RELEASE_ROOT" "$STAGE_DIR"
 
 for item in "${INCLUDE_LIST[@]}"; do

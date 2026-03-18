@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 try {
   $rawUi = $Host.UI.RawUI
   if ($rawUi) {
-    $rawUi.WindowTitle = "MindWall 本地启动"
+    $rawUi.WindowTitle = "有间 本地启动"
   }
 } catch {
 }
@@ -141,7 +141,7 @@ function Wait-ForDockerHealth {
 
 Require-Command "npm"
 $version = Get-ProjectVersion
-Write-Host "MindWall 本地启动脚本 v$version"
+Write-Host "有间 本地启动脚本 v$version"
 Write-Host "工作目录：$Root"
 Write-Host ""
 
@@ -191,8 +191,8 @@ if (-not $SkipMigrate) {
 Pop-Location
 
 Write-Host "[6/6] 启动开发服务"
-Assert-PortAvailable -Port $ApiPort -DisplayName "MindWall API"
-Assert-PortAvailable -Port $WebPort -DisplayName "MindWall Web"
+Assert-PortAvailable -Port $ApiPort -DisplayName "有间 API"
+Assert-PortAvailable -Port $WebPort -DisplayName "有间 Web"
 
 $ApiCommand = "Set-Location '$ApiDir'; `$env:PORT='$ApiPort'; npm run start:dev"
 $WebCommand = "Set-Location '$WebDir'; `$env:VITE_API_BASE_URL='http://localhost:$ApiPort'; `$env:VITE_WS_BASE_URL='ws://localhost:$ApiPort'; npm run dev -- --port $WebPort"

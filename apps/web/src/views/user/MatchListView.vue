@@ -41,21 +41,21 @@ const profileAvatar = computed(() => userStore.viewer?.profile?.anonymous_avatar
 
 function getCachedPersonaName(personaId: string): string {
   const uid = userStore.viewer?.user.id || 'guest';
-  return localStorage.getItem(`mindwall.ai.persona.${uid}.${personaId}.name`) || '匿名用户';
+  return localStorage.getItem(`youjian.ai.persona.${uid}.${personaId}.name`) || '匿名用户';
 }
 
 function cachePersonaNames(candidateList: CandidateContact[]) {
   const uid = userStore.viewer?.user.id || 'guest';
   for (const c of candidateList) {
     if (c.candidate_type === 'ai' && c.name) {
-      localStorage.setItem(`mindwall.ai.persona.${uid}.${c.candidate_id}.name`, c.name);
+      localStorage.setItem(`youjian.ai.persona.${uid}.${c.candidate_id}.name`, c.name);
     }
   }
 }
 
 function getAiSessionsFromLocal(): ContactSession[] {
   const uid = userStore.viewer?.user.id || 'guest';
-  const prefix = `mindwall.ai.chat.${uid}.`;
+  const prefix = `youjian.ai.chat.${uid}.`;
   const sessions: ContactSession[] = [];
   
   for (let i = 0; i < localStorage.length; i++) {

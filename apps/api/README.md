@@ -1,6 +1,6 @@
-# MindWall API（后端）
+# 有间 API（后端）
 
-本目录是 MindWall 的后端服务，基于 NestJS + Prisma。  
+本目录是 有间 的后端服务，基于 NestJS + Prisma。  
 负责用户访谈、标签入库、匹配引擎、沙盒聊天中间层、破壁状态流转和后台配置管理。
 
 ## 运行前准备

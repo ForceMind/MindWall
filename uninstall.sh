@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MindWall 卸载脚本 — 安全移除服务，不影响其他项目
+# 有间 卸载脚本 — 安全移除服务，不影响其他项目
 # 学习自 Minimal-Server-Deploy/Server-Version/uninstall.sh
 head -1 "$0"|grep -q $'\r'&&sed -i 's/\r$//' "$0"&&exec bash "$0" "$@" #
 set -euo pipefail
@@ -31,7 +31,7 @@ REMOVE_DATA="false"
 
 usage() {
   cat <<'EOF'
-MindWall 卸载脚本
+有间 卸载脚本
 
 默认行为：仅停止并移除 systemd 服务，保留数据和 Docker 容器
 
@@ -173,7 +173,7 @@ remove_global_links() {
 show_result() {
   echo
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}${BOLD}  MindWall 卸载完成${NC}"
+  echo -e "${GREEN}${BOLD}  有间 卸载完成${NC}"
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
   echo -e "  systemd 服务:  已移除"
   if [[ "$REMOVE_DOCKER" == "true" ]]; then
@@ -193,7 +193,7 @@ show_result() {
 }
 
 main() {
-  echo -e "${CYAN}${BOLD}MindWall 卸载脚本${NC}  —  目录: $ROOT_DIR"
+  echo -e "${CYAN}${BOLD}有间 卸载脚本${NC}  —  目录: $ROOT_DIR"
   require_root
   stop_systemd_services
   remove_docker_if_requested

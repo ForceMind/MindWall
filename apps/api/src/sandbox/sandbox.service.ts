@@ -563,7 +563,7 @@ export class SandboxService {
       .slice(0, 8);
 
     const fallbackPrompt = [
-      '你是 MindWall 沙盒中间层。',
+      '你是 有间 沙盒中间层。',
       '在用户双方确认破壁前，所有消息都由 AI 总结转述。',
       '评估消息安全性，并将消息改写为第三人称总结形式。',
       '例如："你好" → "对方向你打招呼"',

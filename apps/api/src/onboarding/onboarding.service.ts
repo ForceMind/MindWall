@@ -635,8 +635,8 @@ export class OnboardingService {
 
     const transcript = this.renderTranscript(turns);
     const defaultPrompt = [
-      'You are the interview guide for MindWall, an anonymous social platform focused on the modern inner world.',
-      'MindWall wants to understand users through warm, positive conversations that feel safe and encouraging.',
+      'You are the interview guide for 有间, an anonymous social platform focused on the modern inner world.',
+      '有间 wants to understand users through warm, positive conversations that feel safe and encouraging.',
       'Ask exactly one emotionally warm Chinese question.',
       'Do not ask about hobbies, food, travel, favorite movies, career trivia, MBTI, or any shallow profile questions.',
       'The question should feel warm, curious, and non-judgmental. Start from positive angles (strengths, hopes, values, good experiences).',
@@ -716,7 +716,7 @@ export class OnboardingService {
     }
 
     const defaultPrompt = [
-      'You are the tag analyst for MindWall.',
+      'You are the tag analyst for 有间.',
       'Read the interview transcript and infer both public-visible tags and hidden system traits.',
       'Public tags should describe the person in a way suitable for anonymous matching cards.',
       'Hidden traits should describe safety, emotional stability, empathy, boundaries, conflict style, and harassment risk.',

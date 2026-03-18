@@ -45,7 +45,7 @@ async function submit() {
 <template>
   <main class="auth-screen" style="max-width: 560px">
     <section class="auth-hero">
-      <h1 class="auth-title">MindWall 管理后台</h1>
+      <h1 class="auth-title">有间 管理后台</h1>
       <p class="auth-desc">统一查看用户状态、在线情况、AI 调用与系统配置。</p>
     </section>
 

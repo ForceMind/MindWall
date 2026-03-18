@@ -38,7 +38,7 @@ async function handleLogout() {
       <section class="app-header">
         <div class="brand">
           <strong class="brand-title">{{ title }}</strong>
-          <span class="brand-subtitle">{{ subtitle || 'MindWall 管理后台' }}</span>
+          <span class="brand-subtitle">{{ subtitle || '有间 管理后台' }}</span>
         </div>
 
         <div class="row-wrap">

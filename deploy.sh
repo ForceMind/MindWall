@@ -78,7 +78,7 @@ PKG_MANAGER=""
 
 usage() {
   cat <<'EOF'
-MindWall 部署脚本 v2.1（独立模式，不修改 Nginx/PM2）
+有间 部署脚本 v2.1（独立模式，不修改 Nginx/PM2）
 
 用法:
   sudo bash deploy.sh [选项]
@@ -100,7 +100,7 @@ MindWall 部署脚本 v2.1（独立模式，不修改 Nginx/PM2）
   1) 不修改全局 Nginx 配置
   2) 不接管/修改 PM2
   3) 不占用 80/443
-  4) 不杀死非 MindWall 进程
+  4) 不杀死非 有间 进程
 EOF
 }
 
@@ -758,7 +758,7 @@ stop_legacy_mindwall_processes() {
   local pids
   pids="$(ps -eo pid,args | grep -F "$ROOT_DIR" | grep -E 'vite preview|mindwall-web-server\.cjs|apps/api/dist' | grep -v grep | awk '{print $1}' || true)"
   if [[ -n "$pids" ]]; then
-    log_warn "检测到旧版 MindWall 进程，正在停止: $pids"
+    log_warn "检测到旧版 有间 进程，正在停止: $pids"
     # shellcheck disable=SC2086
     kill $pids 2>/dev/null || true
     sleep 1
@@ -974,7 +974,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(WEB_PORT, '0.0.0.0', () => {
-  process.stdout.write(`MindWall Web listening on :${WEB_PORT}, proxy API :${API_PORT}\n`);
+  process.stdout.write(`有间 Web listening on :${WEB_PORT}, proxy API :${API_PORT}\n`);
 });
 EOF
 }
@@ -988,7 +988,7 @@ setup_api_service() {
 
   cat > /tmp/mindwall-api.service <<EOF
 [Unit]
-Description=MindWall API Service
+Description=有间 API Service
 After=network.target docker.service
 Wants=docker.service
 
@@ -1019,7 +1019,7 @@ setup_web_service() {
 
   cat > /tmp/mindwall-web.service <<EOF
 [Unit]
-Description=MindWall Web Service
+Description=有间 Web Service
 After=network.target $SYSTEMD_API_SERVICE.service
 Wants=$SYSTEMD_API_SERVICE.service
 
@@ -1099,7 +1099,7 @@ print_summary() {
 
   echo
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}${BOLD}  MindWall v$(project_version) 部署完成${NC}"
+  echo -e "${GREEN}${BOLD}  有间 v$(project_version) 部署完成${NC}"
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════${NC}"
   echo -e "  模式:      ${GREEN}独立模式${NC}（不修改 Nginx / 不碰其他服务）"
   if [[ -n "$PUBLIC_HOST" ]]; then
@@ -1128,7 +1128,7 @@ print_summary() {
 main() {
   cd "$ROOT_DIR"
 
-  echo -e "${CYAN}${BOLD}MindWall 部署脚本 v2.1${NC}  目录: $ROOT_DIR  分支: $BRANCH"
+  echo -e "${CYAN}${BOLD}有间 部署脚本 v2.1${NC}  目录: $ROOT_DIR  分支: $BRANCH"
 
   require_root
   validate_project_tree
@@ -1149,7 +1149,7 @@ main() {
 
   backup_runtime_files
 
-  # 停止 MindWall 自己的服务（绝不碰其他进程）
+  # 停止 有间 自己的服务（绝不碰其他进程）
   stop_mindwall_services
   stop_legacy_mindwall_processes
   check_ports

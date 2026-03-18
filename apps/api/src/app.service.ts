@@ -7,7 +7,7 @@ export class AppService {
     const version = getAppVersion();
 
     return {
-      name: 'MindWall API',
+      name: '有间 API',
       status: 'running',
       version,
       time: new Date().toISOString(),

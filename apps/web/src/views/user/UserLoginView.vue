@@ -42,7 +42,7 @@ async function submit() {
 <template>
   <main class="auth-screen">
     <section class="auth-hero">
-      <h1 class="auth-title">心垣 MindWall</h1>
+      <h1 class="auth-title">有间</h1>
       <p class="auth-desc">
         这是一个匿名社交沙盒。初期消息会经过安全中间层重写，先建立心理连接，再决定是否破壁见面。
       </p>

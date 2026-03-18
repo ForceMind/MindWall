@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 try {
   $rawUi = $Host.UI.RawUI
   if ($rawUi) {
-    $rawUi.WindowTitle = "MindWall 服务器部署更新"
+    $rawUi.WindowTitle = "有间 服务器部署更新"
   }
 } catch {
 }
@@ -119,7 +119,7 @@ if (-not $NoDocker) {
   Ensure-DockerEngine
 }
 
-Write-Host "MindWall 商业版部署脚本 v$version"
+Write-Host "有间 商业版部署脚本 v$version"
 Write-Host "工作目录：$Root"
 Write-Host ""
 

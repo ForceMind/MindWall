@@ -45,7 +45,7 @@ project_version() {
 
 usage() {
   cat <<EOF
-MindWall 终端面板 v$(project_version)
+有间 终端面板 v$(project_version)
 
 用法:
   mw                          自动模式（已安装则 update，否则 deploy）
@@ -125,7 +125,7 @@ show_status() {
   load_ports
 
   echo
-  echo -e "${CYAN}${BOLD}MindWall v$(project_version) 状态${NC}"
+  echo -e "${CYAN}${BOLD}有间 v$(project_version) 状态${NC}"
   echo "目录: $ROOT_DIR"
   echo
 
@@ -165,7 +165,7 @@ show_logs() {
 }
 
 do_restart() {
-  echo -e "${CYAN}正在重启 MindWall 服务...${NC}"
+  echo -e "${CYAN}正在重启 有间 服务...${NC}"
   if ! command -v systemctl >/dev/null 2>&1; then
     echo "错误: systemctl 不可用" >&2
     exit 1
@@ -177,7 +177,7 @@ do_restart() {
 }
 
 do_stop() {
-  echo -e "${CYAN}正在停止 MindWall 服务...${NC}"
+  echo -e "${CYAN}正在停止 有间 服务...${NC}"
   if ! command -v systemctl >/dev/null 2>&1; then
     echo "错误: systemctl 不可用" >&2
     exit 1
@@ -203,7 +203,7 @@ do_backup() {
 show_menu() {
   while true; do
     echo
-    echo -e "${CYAN}${BOLD}======== MindWall 终端面板 ========${NC}"
+    echo -e "${CYAN}${BOLD}======== 有间 终端面板 ========${NC}"
     echo "  1) 自动执行（部署或更新）"
     echo "  2) 首次部署"
     echo "  3) 快速更新"

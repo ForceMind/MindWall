@@ -112,7 +112,7 @@ $forbiddenList = @(
   "release"
 )
 
-Write-Host "开始生成 MindWall 最小发布包 v$projectVersion"
+Write-Host "开始生成 有间 最小发布包 v$projectVersion"
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 
