@@ -204,10 +204,11 @@ onMounted(() => {
 
         <div class="row" style="gap: 8px">
           <button
+            v-if="!userStore.viewer?.has_deep_interview"
             class="btn btn-secondary"
             type="button"
             style="font-size: 13px"
-            @click="router.push('/onboarding/interview')"
+            @click="router.push('/onboarding/deep')"
           >
             深度访谈
           </button>

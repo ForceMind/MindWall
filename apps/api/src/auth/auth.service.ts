@@ -166,6 +166,14 @@ export class AuthService {
               ai_justification: true,
             },
           },
+          interview_sessions: {
+            where: {
+              total_questions: { gte: 8 },
+              status: 'completed'
+            },
+            select: { id: true },
+            take: 1,
+          },
         },
       });
 
@@ -182,6 +190,7 @@ export class AuthService {
         },
         profile: user.profile,
         public_tags: user.tags,
+        has_deep_interview: user.interview_sessions.length > 0,
       };
     } catch (error) {
       this.rethrowAuthInfraError(error);

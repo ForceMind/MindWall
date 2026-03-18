@@ -24,24 +24,7 @@ export interface ViewerPayload {
     is_wall_broken: boolean;
   } | null;
   public_tags: PublicTag[];
-}
-
-export interface AuthResponse extends ViewerPayload {
-  session_token: string;
-  expires_at: string;
-}
-
-export interface CandidateContact {
-  candidate_id: string;
-  candidate_type: 'user' | 'ai';
-  disclosure: string;
-  city: string | null;
-  avatar: string | null;
-  name: string;
-  score: number;
-  has_match: boolean;
-  match_id: string | null;
-  match_status: string | null;
+    has_deep_interview?: boolean;
   resonance_score: number | null;
   public_tags: PublicTag[];
 }
@@ -144,7 +127,7 @@ export function saveOnboardingProfile(
   });
 }
 
-export function startOnboardingSession(token: string, type: 'onboarding' | 'deep' = 'onboarding') {
+export function startOnboardingSession(token: string, type: 'onboarding' | 'deep' | 'refresh' = 'onboarding') {
   return httpRequest<{
     status: 'in_progress';
     session_id: string;

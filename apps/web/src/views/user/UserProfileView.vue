@@ -37,8 +37,8 @@ async function handleLogout() {
 
     <section class="panel" style="margin-top: 24px;">
       <div class="panel-body">
-        <button class="btn btn-primary" type="button" style="width: 100%; border-radius: 8px;" @click="router.push('/onboarding/deep')">
-          重新生成画像 (做深度访谈)
+        <button v-if="userStore.viewer?.has_deep_interview" class="btn btn-primary" type="button" style="width: 100%; border-radius: 8px;" @click="router.push('/onboarding/refresh')">
+          更新我的状态
         </button>
         <button class="btn btn-ghost" type="button" style="width: 100%; border-radius: 8px; margin-top: 12px; background: #f0f0f0;" @click="router.push('/onboarding/city')">
           修改城市

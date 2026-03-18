@@ -365,18 +365,18 @@ export class OnboardingService {
         user_id: userId,
         status: 'in_progress',
         answer_count: 0,
-        total_questions: type === 'deep' ? 8 : 4,
+        total_questions: type === 'deep' ? 8 : (type === 'refresh' ? 3 : 4),
         invalid_attempt_count: 0,
       },
     });
 
-    const firstQuestion = await this.generateQuestion([], 0, type === 'deep' ? 8 : 4, userId);
+    const firstQuestion = await this.generateQuestion([], 0, type === 'deep' ? 8 : (type === 'refresh' ? 3 : 4), userId);
     const session: OnboardingSession = {
       sessionId,
       userId,
       turns: [],
       answerCount: 0,
-      totalQuestions: type === 'deep' ? 8 : 4,
+      totalQuestions: type === 'deep' ? 8 : (type === 'refresh' ? 3 : 4),
     };
 
     this.sessions.set(sessionId, session);
@@ -393,7 +393,7 @@ export class OnboardingService {
       user_id: userId,
       city,
       assistant_message: firstQuestion,
-      remaining_questions: type === 'deep' ? 8 : 4,
+      remaining_questions: type === 'deep' ? 8 : (type === 'refresh' ? 3 : 4),
       turns: session.turns,
     };
   }

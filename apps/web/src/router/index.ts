@@ -8,6 +8,7 @@ const UserRestrictedView = () => import('@/views/user/UserRestrictedView.vue');
 const OnboardingProfileView = () => import('@/views/user/OnboardingProfileView.vue');
 const OnboardingInterviewView = () => import('@/views/user/OnboardingInterviewView.vue');
 const DeepInterviewView = () => import('@/views/user/DeepInterviewView.vue');
+const RefreshInterviewView = () => import('@/views/user/RefreshInterviewView.vue');
 const OnboardingCityView = () => import('@/views/user/OnboardingCityView.vue');
 const MatchListView = () => import('@/views/user/MatchListView.vue');
 const UserProfileView = () => import('@/views/user/UserProfileView.vue');
@@ -60,6 +61,7 @@ const router = createRouter({
     { path: '/onboarding/profile', component: OnboardingProfileView, meta: { requiresUser: true } },
     { path: '/onboarding/interview', component: OnboardingInterviewView, meta: { requiresUser: true } },
     { path: '/onboarding/deep', component: DeepInterviewView, meta: { requiresUser: true } },
+    { path: '/onboarding/refresh', component: RefreshInterviewView, meta: { requiresUser: true } },
     { path: '/onboarding/city', component: OnboardingCityView, meta: { requiresUser: true } },
     { path: '/matches', component: MatchListView, meta: { requiresUser: true } },
     { path: '/profile', component: UserProfileView, meta: { requiresUser: true } },
@@ -127,7 +129,7 @@ router.beforeEach(async (to) => {
 
     if (route === '/matches' && isOnboardingPath) {
       // Allow active users to revisit interview for deep interview
-      if (to.path === '/onboarding/interview' || to.path === '/onboarding/deep') {
+      if (to.path === '/onboarding/interview' || to.path === '/onboarding/deep' || to.path === '/onboarding/refresh') {
         return true;
       }
       return '/matches';
