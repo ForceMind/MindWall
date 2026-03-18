@@ -241,3 +241,29 @@ onMounted(() => {
             <span class="muted" style="font-size: 13px">{{ aiRecordsPage }} / {{ aiRecordsTotalPages }}</span>
             <button class="btn btn-ghost" type="button" :disabled="aiRecordsPage >= aiRecordsTotalPages" @click="aiRecordsPage++">下一页</button>
           </div>
+        </div>
+      </div>
+    </section>
+  </AdminShell>
+</template>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in aiRecordsPageItems" :key="row.id">
+                  <td>{{ formatTime(row.created_at) }}</td>
+                  <td>{{ row.feature }}</td>
+                  <td>{{ row.model }}</td>
+                  <td>{{ row.total_tokens }}</td>
+                  <td>{{ row.estimated_cost_usd }}</td>
+                </tr>
+                <tr v-if="aiRecordItems.length === 0">
+                  <td colspan="5" class="muted">暂无记录</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="aiRecordsTotalPages > 1" class="row" style="justify-content: center; gap: 8px; margin-top: 8px">
+            <button class="btn btn-ghost" type="button" :disabled="aiRecordsPage <= 1" @click="aiRecordsPage--">上一页</button>
+            <span class="muted" style="font-size: 13px">{{ aiRecordsPage }} / {{ aiRecordsTotalPages }}</span>
+            <button class="btn btn-ghost" type="button" :disabled="aiRecordsPage >= aiRecordsTotalPages" @click="aiRecordsPage++">下一页</button>
+          </div>
