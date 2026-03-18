@@ -20,6 +20,7 @@ const AdminAiRecordsView = () => import('@/views/admin/AdminAiRecordsView.vue');
 const AdminPromptsView = () => import('@/views/admin/AdminPromptsView.vue');
 const AdminConfigView = () => import('@/views/admin/AdminConfigView.vue');
 const AdminLogsView = () => import('@/views/admin/AdminLogsView.vue');
+const AdminChatsView = () => import('@/views/admin/AdminChatsView.vue');
 
 function resolveUserRoute(userStore: ReturnType<typeof useUserSessionStore>) {
   const viewer = userStore.viewer;
@@ -69,6 +70,7 @@ const router = createRouter({
     { path: '/admin/ai-records', component: AdminAiRecordsView, meta: { requiresAdmin: true } },
     { path: '/admin/prompts', component: AdminPromptsView, meta: { requiresAdmin: true } },
     { path: '/admin/config', component: AdminConfigView, meta: { requiresAdmin: true } },
+    { path: '/admin/chats', component: AdminChatsView, meta: { requiresAdmin: true } },
     { path: '/admin/logs', component: AdminLogsView, meta: { requiresAdmin: true } },
 
     { path: '/:pathMatch(.*)*', redirect: '/matches' },
@@ -120,6 +122,10 @@ router.beforeEach(async (to) => {
     }
 
     if (route === '/matches' && isOnboardingPath) {
+      // Allow active users to revisit interview for deep interview
+      if (to.path === '/onboarding/interview') {
+        return true;
+      }
       return '/matches';
     }
 

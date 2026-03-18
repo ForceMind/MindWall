@@ -377,8 +377,9 @@ async function initMatchChat() {
 }
 
 async function initAiChat() {
-  title.value = '匿名会话';
-  loadAiHistory();
+    title.value = localStorage.getItem(`mindwall.ai.persona.${id.value}.name`) || '匿名会话';
+    wall.value.wallBroken = true;
+    wall.value.status = 'wall_broken';
 
   if (messages.value.length === 0) {
     addSystemMessage('你们已建立匿名连接，请从一句真诚的话开始。', 'init');
@@ -520,7 +521,7 @@ onBeforeUnmount(() => {
       <header class="panel-body" style="padding-bottom: 8px">
         <div class="row" style="justify-content: space-between">
           <span class="badge badge-muted">共鸣值 {{ wall.resonanceScore }}</span>
-          <span v-if="isMatchChat" class="badge" :class="wall.wallBroken ? 'badge-success' : 'badge-accent'">
+          <span class="badge" :class="wall.wallBroken ? 'badge-success' : 'badge-accent'">
             {{ wall.wallBroken ? '已破壁直聊' : 'AI 转述中' }}
           </span>
         </div>

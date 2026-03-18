@@ -75,4 +75,13 @@ export class OnboardingController {
   ) {
     return this.onboardingService.submitMessageForUser(sessionId, body, user.userId);
   }
+
+  @Post('me/session/:sessionId/skip')
+  @UseGuards(SessionAuthGuard)
+  async skipInterview(
+    @CurrentUser() user: SessionUser,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.onboardingService.skipSessionForUser(sessionId, user.userId);
+  }
 }

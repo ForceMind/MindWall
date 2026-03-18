@@ -21,6 +21,7 @@ const navItems = [
   { to: '/admin/online', label: '在线' },
   { to: '/admin/ai-records', label: 'AI记录' },
   { to: '/admin/prompts', label: '提示词' },
+  { to: '/admin/chats', label: '会话' },
   { to: '/admin/config', label: '配置' },
   { to: '/admin/logs', label: '日志' },
 ];

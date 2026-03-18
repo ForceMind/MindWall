@@ -260,3 +260,56 @@ export function fetchAdminLogs(token: string, lines = 300) {
     headers: adminHeaders(token),
   });
 }
+
+export interface AdminMatch {
+  id: string;
+  status: string;
+  resonance_score: number;
+  ai_match_reason: string | null;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  wall_broken_at: string | null;
+  user_a: { user_id: string; username: string | null; anonymous_name: string | null; city: string | null };
+  user_b: { user_id: string; username: string | null; anonymous_name: string | null; city: string | null };
+}
+
+export interface AdminMatchMessage {
+  id: string;
+  sender_id: string;
+  sender_name: string;
+  ai_action: string;
+  original_text: string;
+  ai_rewritten_text: string;
+  created_at: string;
+}
+
+export function fetchAdminMatches(token: string, page: number, limit: number) {
+  return httpRequest<{
+    page: number;
+    limit: number;
+    total: number;
+    matches: AdminMatch[];
+  }>(`/admin/dashboard/matches?page=${page}&limit=${limit}`, {
+    headers: adminHeaders(token),
+  });
+}
+
+export function fetchAdminMatchMessages(token: string, matchId: string, page: number, limit: number) {
+  return httpRequest<{
+    match: {
+      id: string;
+      user_a_id: string;
+      user_b_id: string;
+      status: string;
+      resonance_score: number;
+      wall_broken_at: string | null;
+    };
+    page: number;
+    limit: number;
+    total: number;
+    messages: AdminMatchMessage[];
+  }>(`/admin/dashboard/matches/${matchId}/messages?page=${page}&limit=${limit}`, {
+    headers: adminHeaders(token),
+  });
+}

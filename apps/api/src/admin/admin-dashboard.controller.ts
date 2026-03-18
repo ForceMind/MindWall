@@ -67,6 +67,30 @@ export class AdminDashboardController {
     return this.adminDashboardService.getPrompts();
   }
 
+  @Get('matches')
+  async matches(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminDashboardService.listMatches(
+      Number(page || 1),
+      Number(limit || 20),
+    );
+  }
+
+  @Get('matches/:matchId/messages')
+  async matchMessages(
+    @Param('matchId') matchId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminDashboardService.getMatchMessages(
+      matchId,
+      Number(page || 1),
+      Number(limit || 50),
+    );
+  }
+
   @Put('prompts/:key')
   async updatePrompt(
     @Param('key') key: string,

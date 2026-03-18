@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
-import { startOnboardingSession, sendOnboardingMessage, type PublicTag } from '@/lib/user-api';
+import { startOnboardingSession, sendOnboardingMessage, skipOnboardingSession, type PublicTag } from '@/lib/user-api';
 import { toErrorMessage } from '@/lib/api-error';
 import { useNoticeStore } from '@/stores/notice';
 import { useUserSessionStore } from '@/stores/user-session';
@@ -30,6 +30,7 @@ const tags = ref<PublicTag[]>([]);
 const chatBoxRef = ref<HTMLElement | null>(null);
 const inputWarning = ref('');
 const turnsCollapsed = ref(false);
+const skipping = ref(false);
 
 async function bootstrapSession() {
   if (!userStore.token) {
@@ -145,6 +146,34 @@ function scrollToBottom() {
   chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
 }
 
+async function skipInterview() {
+  if (!sessionId.value || !userStore.token || skipping.value) return;
+
+  skipping.value = true;
+  pageError.value = '';
+  try {
+    turnsCollapsed.value = true;
+    analyzing.value = true;
+    analyzeHint.value = '正在生成你的画像...';
+
+    const payload = await skipOnboardingSession(userStore.token, sessionId.value);
+    await new Promise((r) => setTimeout(r, 1500));
+    analyzing.value = false;
+
+    done.value = true;
+    summary.value = String(payload.onboarding_summary || '');
+    tags.value = (payload.public_tags || []) as PublicTag[];
+    await userStore.refreshViewer();
+    noticeStore.show('访谈已跳过，已生成基础画像', 'success');
+  } catch (error) {
+    analyzing.value = false;
+    turnsCollapsed.value = false;
+    pageError.value = toErrorMessage(error);
+  } finally {
+    skipping.value = false;
+  }
+}
+
 function handleViewportResize() {
   scrollToBottom();
 }
@@ -214,9 +243,14 @@ onBeforeUnmount(() => {
             :disabled="loading || sending"
             @keydown.enter.exact.prevent="submitAnswer"
           />
-          <button class="btn btn-primary" type="button" :disabled="loading || sending || !answer.trim()" @click="submitAnswer">
-            {{ sending ? '发送中' : '发送' }}
-          </button>
+          <div class="row" style="gap: 8px">
+            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skipping" @click="skipInterview" style="font-size: 13px; white-space: nowrap">
+              跳过
+            </button>
+            <button class="btn btn-primary" type="button" :disabled="loading || sending || !answer.trim()" @click="submitAnswer">
+              {{ sending ? '发送中' : '发送' }}
+            </button>
+          </div>
         </div>
 
         <div v-else class="column">

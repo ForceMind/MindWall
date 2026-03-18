@@ -35,16 +35,23 @@ const profileName = computed(
 );
 const profileAvatar = computed(() => userStore.viewer?.profile?.anonymous_avatar || '');
 
-const AI_PERSONAS: Record<string, { name: string; disclosure: string }> = {
-  ai_psychologist: { name: '心灵访谈师', disclosure: 'AI 心灵陪伴' },
-  ai_reflective: { name: '夏雾来信', disclosure: '匹配对象' },
-  ai_boundary: { name: '林间坐标', disclosure: '匹配对象' },
-  ai_warm: { name: '夜航电台', disclosure: '匹配对象' },
-};
+const AI_PERSONA_IDS = ['ai_psychologist', 'ai_reflective', 'ai_boundary', 'ai_warm'];
+
+function getCachedPersonaName(personaId: string): string {
+  return localStorage.getItem(`mindwall.ai.persona.${personaId}.name`) || '匿名用户';
+}
+
+function cachePersonaNames(candidateList: CandidateContact[]) {
+  for (const c of candidateList) {
+    if (c.candidate_type === 'ai' && c.name) {
+      localStorage.setItem(`mindwall.ai.persona.${c.candidate_id}.name`, c.name);
+    }
+  }
+}
 
 function getAiSessionsFromLocal(): ContactSession[] {
   const sessions: ContactSession[] = [];
-  for (const key of Object.keys(AI_PERSONAS)) {
+  for (const key of AI_PERSONA_IDS) {
     const storageKey = `mindwall.ai.chat.${key}`;
     const raw = localStorage.getItem(storageKey);
     if (!raw) continue;
@@ -52,13 +59,12 @@ function getAiSessionsFromLocal(): ContactSession[] {
       const msgs = JSON.parse(raw);
       if (!Array.isArray(msgs) || msgs.length === 0) continue;
       const last = msgs[msgs.length - 1];
-      const info = AI_PERSONAS[key];
       sessions.push({
         match_id: key,
         counterpart_user_id: key,
         candidate_type: 'ai',
-        disclosure: info.disclosure,
-        name: info.name,
+        disclosure: '匹配对象',
+        name: getCachedPersonaName(key),
         avatar: null,
         city: null,
         status: 'wall_broken',
@@ -93,9 +99,10 @@ async function loadData(isRefresh = false) {
       fetchCandidates(userStore.token),
     ]);
 
-    contacts.value = [...getAiSessionsFromLocal(), ...contactPayload.contacts];
     candidates.value = candidatePayload.candidates;
     cityScope.value = candidatePayload.city_scope;
+    cachePersonaNames(candidatePayload.candidates);
+    contacts.value = [...getAiSessionsFromLocal(), ...contactPayload.contacts];
 
     if (contacts.value.length === 0 && candidates.value.length > 0) {
       activePane.value = 'discover';
@@ -109,8 +116,7 @@ async function loadData(isRefresh = false) {
 }
 
 function openMatch(matchId: string) {
-  // AI companion sessions use their persona id as match_id
-  if (AI_PERSONAS[matchId]) {
+  if (AI_PERSONA_IDS.includes(matchId)) {
     router.push(`/chat/ai/${matchId}`);
     return;
   }
@@ -168,14 +174,24 @@ onMounted(() => {
           </div>
         </div>
 
-        <button
-          class="btn btn-ghost"
-          type="button"
-          :disabled="refreshing"
-          @click="loadData(true)"
-        >
-          {{ refreshing ? '刷新中...' : '刷新' }}
-        </button>
+        <div class="row" style="gap: 8px">
+          <button
+            class="btn btn-ghost"
+            type="button"
+            style="font-size: 13px"
+            @click="router.push('/onboarding/interview')"
+          >
+            深度访谈
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="refreshing"
+            @click="loadData(true)"
+          >
+            {{ refreshing ? '刷新中...' : '刷新' }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -223,8 +239,8 @@ onMounted(() => {
                     </div>
                   </div>
                 </div>
-                <span class="badge" :class="item.candidate_type === 'ai' ? 'badge-muted' : statusBadgeClass(item.status)">{{
-                  item.candidate_type === 'ai' ? item.disclosure : statusText(item.status)
+                <span class="badge" :class="statusBadgeClass(item.status)">{{
+                  statusText(item.status)
                 }}</span>
               </div>
 

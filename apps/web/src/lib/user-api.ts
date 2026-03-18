@@ -185,6 +185,19 @@ export function sendOnboardingMessage(token: string, sessionId: string, message:
   });
 }
 
+export function skipOnboardingSession(token: string, sessionId: string) {
+  return httpRequest<{
+    status: 'completed';
+    user_id: string;
+    public_tags: PublicTag[];
+    onboarding_summary: string;
+  }>(`/onboarding/me/session/${sessionId}/skip`, {
+    method: 'POST',
+    token,
+    body: {},
+  });
+}
+
 export function saveOnboardingCity(token: string, city: string) {
   return httpRequest<{
     status: 'ok';

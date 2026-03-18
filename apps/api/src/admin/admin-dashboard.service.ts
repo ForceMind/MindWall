@@ -547,6 +547,149 @@ export class AdminDashboardService {
     };
   }
 
+  async listMatches(page: number, limit: number) {
+    const safePage = Math.max(1, Math.round(page || 1));
+    const safeLimit = Math.max(1, Math.min(100, Math.round(limit || 20)));
+    const skip = (safePage - 1) * safeLimit;
+
+    const [total, matches] = await Promise.all([
+      this.prisma.match.count(),
+      this.prisma.match.findMany({
+        skip,
+        take: safeLimit,
+        orderBy: { updated_at: 'desc' },
+        select: {
+          id: true,
+          user_a_id: true,
+          user_b_id: true,
+          status: true,
+          resonance_score: true,
+          ai_match_reason: true,
+          created_at: true,
+          updated_at: true,
+          wall_broken_at: true,
+          _count: { select: { messages: true } },
+        },
+      }),
+    ]);
+
+    const userIds = new Set<string>();
+    for (const m of matches) {
+      userIds.add(m.user_a_id);
+      userIds.add(m.user_b_id);
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: Array.from(userIds) } },
+      select: {
+        id: true,
+        credential: { select: { username: true } },
+        profile: { select: { anonymous_name: true, city: true } },
+      },
+    });
+    const userMap = new Map(
+      users.map((u) => [u.id, {
+        username: u.credential?.username || null,
+        anonymous_name: u.profile?.anonymous_name || null,
+        city: u.profile?.city || null,
+      }]),
+    );
+
+    return {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      matches: matches.map((m) => ({
+        id: m.id,
+        status: m.status,
+        resonance_score: m.resonance_score,
+        ai_match_reason: m.ai_match_reason,
+        message_count: m._count.messages,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+        wall_broken_at: m.wall_broken_at,
+        user_a: { user_id: m.user_a_id, ...userMap.get(m.user_a_id) },
+        user_b: { user_id: m.user_b_id, ...userMap.get(m.user_b_id) },
+      })),
+    };
+  }
+
+  async getMatchMessages(matchId: string, page: number, limit: number) {
+    const safeLimit = Math.max(1, Math.min(200, Math.round(limit || 50)));
+    const safePage = Math.max(1, Math.round(page || 1));
+    const skip = (safePage - 1) * safeLimit;
+
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: {
+        id: true,
+        user_a_id: true,
+        user_b_id: true,
+        status: true,
+        resonance_score: true,
+        wall_broken_at: true,
+      },
+    });
+
+    if (!match) {
+      throw new NotFoundException('Match not found.');
+    }
+
+    const [total, messages] = await Promise.all([
+      this.prisma.sandboxMessage.count({ where: { match_id: matchId } }),
+      this.prisma.sandboxMessage.findMany({
+        where: { match_id: matchId },
+        orderBy: { created_at: 'asc' },
+        skip,
+        take: safeLimit,
+        select: {
+          id: true,
+          sender_id: true,
+          ai_action: true,
+          original_text: true,
+          ai_rewritten_text: true,
+          created_at: true,
+        },
+      }),
+    ]);
+
+    const userIds = [match.user_a_id, match.user_b_id];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        credential: { select: { username: true } },
+        profile: { select: { anonymous_name: true } },
+      },
+    });
+    const userMap = new Map(
+      users.map((u) => [u.id, u.credential?.username || u.profile?.anonymous_name || u.id.slice(0, 8)]),
+    );
+
+    return {
+      match: {
+        id: match.id,
+        user_a_id: match.user_a_id,
+        user_b_id: match.user_b_id,
+        status: match.status,
+        resonance_score: match.resonance_score,
+        wall_broken_at: match.wall_broken_at,
+      },
+      page: safePage,
+      limit: safeLimit,
+      total,
+      messages: messages.map((m) => ({
+        id: m.id,
+        sender_id: m.sender_id,
+        sender_name: userMap.get(m.sender_id) || m.sender_id.slice(0, 8),
+        ai_action: m.ai_action,
+        original_text: m.original_text,
+        ai_rewritten_text: m.ai_rewritten_text,
+        created_at: m.created_at,
+      })),
+    };
+  }
+
   private async readUserLogs(userId: string, sessionIds: string[]) {
     const tail = await this.serverLogService.tail(1000);
     const sessionIdSet = new Set(sessionIds);

@@ -33,7 +33,7 @@ export class ContactsService {
     if (!city) {
       return {
         city_scope: null,
-        candidates: this.buildAiCandidates(me.tags, null),
+        candidates: this.buildAiCandidates(me.tags, null, userId),
       };
     }
 
@@ -143,7 +143,7 @@ export class ContactsService {
 
     return {
       city_scope: city,
-      candidates: [...candidates, ...this.buildAiCandidates(me.tags, city)],
+      candidates: [...candidates, ...this.buildAiCandidates(me.tags, city, userId)],
     };
   }
 
@@ -338,27 +338,12 @@ export class ContactsService {
   private buildAiCandidates(
     selfTags: Array<{ tag_name: string; weight: number }>,
     city?: string | null,
+    userId?: string,
   ) {
     const seedTags = selfTags
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 2)
       .map((item) => item.tag_name);
-
-    // Generate city-flavored names when city is available
-    const cityNameMap: Record<string, [string, string, string]> = {
-      '北京': ['胡同漫步', '故宫夜话', '后海清风'],
-      '上海': ['外滩来信', '弄堂闲话', '梧桐路口'],
-      '广州': ['骑楼晚风', '茶楼小记', '珠江夜色'],
-      '深圳': ['南山信号', '梅林时差', '湾区晚安'],
-      '成都': ['火锅电台', '太古漫游', '锦里日常'],
-      '杭州': ['西湖晨跑', '拱墅夜话', '钱塘信箱'],
-      '武汉': ['江城热干', '东湖散步', '黄鹤夜话'],
-      '南京': ['鸡鸣信箱', '玄武散步', '秦淮夜话'],
-      '重庆': ['山城爬坡', '洪崖洞灯', '两江夜话'],
-      '长沙': ['橘洲电台', '岳麓散步', '湘江夜话'],
-    };
-
-    const cityNames = (city && cityNameMap[city]) || null;
 
     const personas = [
       {
@@ -366,11 +351,11 @@ export class ContactsService {
         name: '心灵访谈师',
         tags: ['心理倾听', '深度对话', ...seedTags],
         summary: '基于你的访谈画像进行深度对话的 AI 陪伴者。',
-        disclosure: 'AI 心灵陪伴',
+        disclosure: '匹配对象',
       },
       {
         id: 'ai_reflective',
-        name: cityNames?.[0] || '夏雾来信',
+        name: this.generateDynamicName(userId || '', 'ai_reflective', city || null),
         tags: ['情绪共情', '慢节奏交流', ...seedTags],
         summary: city
           ? `同在${city}，偏向接住情绪、循序推进关系。`
@@ -379,7 +364,7 @@ export class ContactsService {
       },
       {
         id: 'ai_boundary',
-        name: cityNames?.[1] || '林间坐标',
+        name: this.generateDynamicName(userId || '', 'ai_boundary', city || null),
         tags: ['边界感', '关系观察', ...seedTags],
         summary: city
           ? `同在${city}，偏向清晰边界、稳定沟通。`
@@ -388,7 +373,7 @@ export class ContactsService {
       },
       {
         id: 'ai_warm',
-        name: cityNames?.[2] || '夜航电台',
+        name: this.generateDynamicName(userId || '', 'ai_warm', city || null),
         tags: ['温柔表达', '安全陪伴', ...seedTags],
         summary: city
           ? `同在${city}，偏向温和聊天与日常安抚。`
@@ -445,5 +430,52 @@ export class ContactsService {
       </svg>
     `.replace(/\s+/g, ' ');
     return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+  }
+
+  private generateDynamicName(userId: string, personaId: string, city: string | null): string {
+    const seed = this.hashSeed(`${userId}:${personaId}`);
+    const prefixes = [
+      '晨曦', '微澜', '星尘', '清风', '夜语', '暖阳',
+      '浮光', '远山', '深海', '云端', '松影', '晚钟',
+      '雪月', '潮汐', '烟雨', '青石', '白鸟', '秋水',
+    ];
+    const suffixes = [
+      '旅人', '信箱', '电台', '散步', '日常', '夜话',
+      '回声', '漫游', '远行', '观察', '听雨', '栖息',
+    ];
+
+    if (city) {
+      const cityPrefixes: Record<string, string[]> = {
+        '北京': ['胡同', '后海', '故宫', '鼓楼'],
+        '上海': ['外滩', '弄堂', '梧桐', '静安'],
+        '广州': ['骑楼', '珠江', '茶楼', '荔枝'],
+        '深圳': ['南山', '湾区', '梅林', '华强'],
+        '成都': ['锦里', '太古', '宽窄', '春熙'],
+        '杭州': ['西湖', '拱墅', '钱塘', '龙井'],
+        '武汉': ['江城', '东湖', '黄鹤', '热干'],
+        '南京': ['鸡鸣', '玄武', '秦淮', '紫金'],
+        '重庆': ['山城', '洪崖', '两江', '磁器'],
+        '长沙': ['橘洲', '岳麓', '湘江', '天心'],
+      };
+      const local = cityPrefixes[city];
+      if (local) {
+        const prefix = local[seed % local.length];
+        const suffix = suffixes[(seed >>> 4) % suffixes.length];
+        return `${prefix}${suffix}`;
+      }
+    }
+
+    const prefix = prefixes[seed % prefixes.length];
+    const suffix = suffixes[(seed >>> 4) % suffixes.length];
+    return `${prefix}${suffix}`;
+  }
+
+  private hashSeed(text: string): number {
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
   }
 }

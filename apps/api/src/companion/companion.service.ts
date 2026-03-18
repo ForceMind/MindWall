@@ -35,10 +35,10 @@ interface DynamicPersonaContext {
 @Injectable()
 export class CompanionService {
   private readonly logger = new Logger(CompanionService.name);
-  private readonly personas: Persona[] = [
+  private readonly personaArchetypes: Persona[] = [
     {
       id: 'ai_reflective',
-      name: '夏雾来信',
+      name: '匿名用户',
       rhythm: '慢节奏、停顿后再回应',
       attachment: '谨慎靠近型',
       boundary: '尊重边界，不追问隐私',
@@ -47,7 +47,7 @@ export class CompanionService {
     },
     {
       id: 'ai_boundary',
-      name: '林间坐标',
+      name: '匿名用户',
       rhythm: '简洁直接',
       attachment: '稳定对等型',
       boundary: '偏清晰边界和规则感',
@@ -56,7 +56,7 @@ export class CompanionService {
     },
     {
       id: 'ai_warm',
-      name: '夜航电台',
+      name: '匿名用户',
       rhythm: '轻松自然',
       attachment: '陪伴支持型',
       boundary: '不过度承诺',
@@ -73,6 +73,7 @@ export class CompanionService {
       conflict: '多角度提问、逐步深化',
     },
   ];
+  private readonly userPersonaCache = new Map<string, Persona[]>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -239,40 +240,75 @@ export class CompanionService {
 
   private resolvePersona(companionId: string | undefined, userId: string, city: string | null): Persona {
     const normalized = (companionId || '').trim().toLowerCase();
-    let persona: Persona;
+    let archetype: Persona;
     if (normalized) {
-      const found = this.personas.find((item) => item.id === normalized);
-      persona = found || this.personas[0];
+      const found = this.personaArchetypes.find((item) => item.id === normalized);
+      archetype = found || this.personaArchetypes[0];
     } else {
       let hash = 2166136261;
       for (let i = 0; i < userId.length; i += 1) {
         hash ^= userId.charCodeAt(i);
         hash = Math.imul(hash, 16777619);
       }
-      persona = this.personas[Math.abs(hash) % this.personas.length] || this.personas[0];
+      archetype = this.personaArchetypes[Math.abs(hash) % this.personaArchetypes.length] || this.personaArchetypes[0];
     }
 
-    // Override name with city-specific variant if available
+    // Psychologist keeps its fixed name
+    if (archetype.id === 'ai_psychologist') {
+      return archetype;
+    }
+
+    // Generate a unique anonymous name per user+persona combination
+    const dynamicName = this.generatePersonaName(userId, archetype.id, city);
+    return { ...archetype, name: dynamicName };
+  }
+
+  private generatePersonaName(userId: string, personaId: string, city: string | null): string {
+    const seed = this.hashSeed(`${userId}:${personaId}`);
+    const prefixes = [
+      '晨曦', '微澜', '星尘', '清风', '夜语', '暖阳',
+      '浮光', '远山', '深海', '云端', '松影', '晚钟',
+      '雪月', '潮汐', '烟雨', '青石', '白鸟', '秋水',
+    ];
+    const suffixes = [
+      '旅人', '信箱', '电台', '散步', '日常', '夜话',
+      '回声', '漫游', '远行', '观察', '听雨', '栖息',
+    ];
+
+    // City-specific prefixes for variety
     if (city) {
-      const cityNameMap: Record<string, Record<string, string>> = {
-        '北京': { ai_reflective: '胡同漫步', ai_boundary: '故宫夜话', ai_warm: '后海清风' },
-        '上海': { ai_reflective: '外滩来信', ai_boundary: '弄堂闲话', ai_warm: '梧桐路口' },
-        '广州': { ai_reflective: '骑楼晚风', ai_boundary: '茶楼小记', ai_warm: '珠江夜色' },
-        '深圳': { ai_reflective: '南山信号', ai_boundary: '梅林时差', ai_warm: '湾区晚安' },
-        '成都': { ai_reflective: '火锅电台', ai_boundary: '太古漫游', ai_warm: '锦里日常' },
-        '杭州': { ai_reflective: '西湖晨跑', ai_boundary: '拱墅夜话', ai_warm: '钱塘信箱' },
-        '武汉': { ai_reflective: '江城热干', ai_boundary: '东湖散步', ai_warm: '黄鹤夜话' },
-        '南京': { ai_reflective: '鸡鸣信箱', ai_boundary: '玄武散步', ai_warm: '秦淮夜话' },
-        '重庆': { ai_reflective: '山城爬坡', ai_boundary: '洪崖洞灯', ai_warm: '两江夜话' },
-        '长沙': { ai_reflective: '橘洲电台', ai_boundary: '岳麓散步', ai_warm: '湘江夜话' },
+      const cityPrefixes: Record<string, string[]> = {
+        '北京': ['胡同', '后海', '故宫', '鼓楼'],
+        '上海': ['外滩', '弄堂', '梧桐', '静安'],
+        '广州': ['骑楼', '珠江', '茶楼', '荔枝'],
+        '深圳': ['南山', '湾区', '梅林', '华强'],
+        '成都': ['锦里', '太古', '宽窄', '春熙'],
+        '杭州': ['西湖', '拱墅', '钱塘', '龙井'],
+        '武汉': ['江城', '东湖', '黄鹤', '热干'],
+        '南京': ['鸡鸣', '玄武', '秦淮', '紫金'],
+        '重庆': ['山城', '洪崖', '两江', '磁器'],
+        '长沙': ['橘洲', '岳麓', '湘江', '天心'],
       };
-      const cityOverride = cityNameMap[city]?.[persona.id];
-      if (cityOverride) {
-        return { ...persona, name: cityOverride };
+      const local = cityPrefixes[city];
+      if (local) {
+        const prefix = local[seed % local.length];
+        const suffix = suffixes[(seed >>> 4) % suffixes.length];
+        return `${prefix}${suffix}`;
       }
     }
 
-    return persona;
+    const prefix = prefixes[seed % prefixes.length];
+    const suffix = suffixes[(seed >>> 4) % suffixes.length];
+    return `${prefix}${suffix}`;
+  }
+
+  private hashSeed(text: string): number {
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
   }
 
   private buildFallbackReply(
