@@ -73,13 +73,14 @@ export class CompanionService {
       messages: messages.map(m => {
         const isUser = m.sender_type === 'user';
         const rawText = m.original_text || m.ai_rewritten_text;
+        const storedRelay = (m as any).relay_text as string | null;
         return {
           id: m.id,
           role: m.sender_type,
           text: m.ai_rewritten_text,
           original_text: isUser ? m.original_text : undefined,
-          relay_text: wallBroken ? undefined : this.summarizeForRelay(rawText, resonanceScore),
-          sender_summary: (isUser && !wallBroken) ? this.summarizeForSender(rawText, resonanceScore) : undefined,
+          relay_text: wallBroken ? undefined : (storedRelay || this.summarizeForRelay(rawText, resonanceScore)),
+          sender_summary: (isUser && !wallBroken) ? (storedRelay || this.summarizeForSender(rawText, resonanceScore)) : undefined,
           created_at: m.created_at,
         };
       })
@@ -131,14 +132,16 @@ export class CompanionService {
       const lastMsg = newMessages[newMessages.length - 1];
       if (lastMsg && lastMsg.role === 'user') {
         rawHistory.push({ role: 'user', text: lastMsg.text });
-        await this.prisma.companionMessage.create({
+        const savedUserMsg = await this.prisma.companionMessage.create({
           data: {
             session_id: companionSession.id,
             sender_type: 'user',
             original_text: lastMsg.text,
             ai_rewritten_text: lastMsg.text || '',
-          }
+          },
+          select: { id: true },
         });
+        (companionSession as any).__lastUserMsgId = savedUserMsg.id;
       }
     }
 
@@ -315,25 +318,41 @@ export class CompanionService {
     if (!isPsychologist && this.isIdentityProbe(lastUserMessage)) {
       const reply = this.buildIdentityDeflectionReply(lastUserMessage);
       
+      const resonanceScore = Math.min(userMsgCount * 5, 100);
+      const wallBroken = isChatPool || resonanceScore >= 100;
+      const inSandbox = !wallBroken;
+
+      // Generate relay texts (AI-powered when possible)
+      let senderSummary: string | undefined;
+      let replyRelay: string | undefined;
+      if (inSandbox) {
+        const relayResult = await this.generateRelayTexts(userId, lastUserMessage, reply, resonanceScore);
+        senderSummary = relayResult.senderSummary;
+        replyRelay = relayResult.replyRelay;
+      }
+
+      // Save assistant message with relay_text
       await this.prisma.companionMessage.create({
-        data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply }
+        data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply, relay_text: replyRelay }
       });
+      // Update user message with relay_text
+      const lastUserMsgId = (companionSession as any).__lastUserMsgId;
+      if (lastUserMsgId && senderSummary) {
+        await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderSummary } });
+      }
       await this.prisma.companionSession.update({
         where: { id: companionSession.id },
         data: { updated_at: new Date() }
       });
 
-      const resonanceScore = Math.min(userMsgCount * 5, 100);
-      const wallBroken = isChatPool || resonanceScore >= 100;
-      const inSandbox = !wallBroken;
       return {
         session_id: companionSession.id,
         mode: 'simulated_contact',
         contact_id: persona.id,
         contact_name: persona.name,
         reply,
-        sender_summary: inSandbox ? this.summarizeForSender(lastUserMessage, resonanceScore) : undefined,
-        reply_relay: inSandbox ? this.summarizeForRelay(reply, resonanceScore) : undefined,
+        sender_summary: senderSummary,
+        reply_relay: replyRelay,
         resonance_score: resonanceScore,
         wall_ready: !wallBroken && resonanceScore >= 85,
         wall_broken: wallBroken,
@@ -365,25 +384,48 @@ export class CompanionService {
       }
     }
 
+    const resonanceScore = Math.min(userMsgCount * 5, 100);
+    const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
+    const inSandbox = !wallBroken;
+
+    // Generate relay texts (AI-powered when possible)
+    let senderSummary: string | undefined;
+    let replyRelay: string | undefined;
+    if (inSandbox) {
+      const relayResult = await this.generateRelayTexts(userId, lastUserMessage, reply, resonanceScore);
+      senderSummary = relayResult.senderSummary;
+      replyRelay = relayResult.replyRelay;
+    }
+
+    // Save assistant reply with relay_text
     await this.prisma.companionMessage.create({
-      data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply }
+      data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply, relay_text: replyRelay }
     });
+    // Update user message with relay_text
+    const lastUserMsgId = (companionSession as any).__lastUserMsgId;
+    if (lastUserMsgId && senderSummary) {
+      await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderSummary } });
+    }
     await this.prisma.companionSession.update({
       where: { id: companionSession.id },
       data: { updated_at: new Date() }
     });
 
-    const resonanceScore = Math.min(userMsgCount * 5, 100);
-    const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
-    const inSandbox = !wallBroken;
+    // Trigger background tag refinement every 8 user messages
+    if (userMsgCount > 0 && userMsgCount % 8 === 0) {
+      this.refineTagsFromChat(userId, companionSession.id).catch(err =>
+        this.logger.warn(`Tag refinement failed: ${err.message}`),
+      );
+    }
+
     return {
       session_id: companionSession.id,
       mode: 'simulated_contact',
       contact_id: persona.id,
       contact_name: persona.name,
       reply,
-      sender_summary: inSandbox ? this.summarizeForSender(lastUserMessage, resonanceScore) : undefined,
-      reply_relay: inSandbox ? this.summarizeForRelay(reply, resonanceScore) : undefined,
+      sender_summary: senderSummary,
+      reply_relay: replyRelay,
       resonance_score: resonanceScore,
       wall_ready: !wallBroken && resonanceScore >= 85,
       wall_broken: wallBroken,
@@ -765,6 +807,208 @@ export class CompanionService {
         error: (error as Error).message,
       });
       return null;
+    }
+  }
+
+  private async generateRelayTexts(
+    userId: string,
+    userMessage: string,
+    aiReply: string,
+    resonanceScore: number,
+  ): Promise<{ senderSummary: string; replyRelay: string }> {
+    const fallback = {
+      senderSummary: this.summarizeForSender(userMessage, resonanceScore),
+      replyRelay: this.summarizeForRelay(aiReply, resonanceScore),
+    };
+    try {
+      const aiConfig = await this.adminConfigService.getAiConfig();
+      const apiKey = aiConfig.openaiApiKey;
+      if (!apiKey) return fallback;
+
+      const warm = resonanceScore >= 70;
+      const toneHint = warm ? '语气可以略带亲切感' : '语气保持中立自然';
+
+      const response = await fetch(
+        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: aiConfig.openaiModel,
+            temperature: 0.3,
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  '你是匿名社交平台的消息转述助手。用户之间的消息需要经过你的转述后展示。',
+                  '转述规则：',
+                  '1. 保留消息的核心意图、话题和情感色彩，让读者知道对方在说什么',
+                  '2. 用不同但自然的措辞重新表达，不照搬原文',
+                  '3. sender 字段用"你"开头（描述发送者做了什么），relay 字段用"对方"开头（描述对方说了什么）',
+                  '4. 每条转述 8-20 个字，简洁有信息量',
+                  `5. ${toneHint}`,
+                  '6. 严格只返回纯 JSON，不加任何 markdown 标记',
+                  '',
+                  '示例：',
+                  '用户说"你平时都喜欢做什么？" → sender:"你问了对方平时的兴趣爱好" relay 不适用',
+                  '对方说"我最近在学吉他，感觉挺有意思的" → relay:"对方聊了最近在学的新东西，觉得很有意思"',
+                  '用户说"我对你很好奇" → sender:"你表达了对对方的好奇"',
+                ].join('\n'),
+              },
+              {
+                role: 'user',
+                content: `用户发送的消息："${userMessage.slice(0, 200)}"\n对方的回复："${aiReply.slice(0, 200)}"\n\n请输出JSON：{"sender":"你...","relay":"对方..."}`,
+              },
+            ],
+          }),
+        },
+      );
+      if (!response.ok) return fallback;
+
+      const payload = (await response.json()) as any;
+      const content = payload.choices?.[0]?.message?.content?.trim();
+      if (!content) return fallback;
+
+      const cleaned = content.replace(/```json?\n?|\n?```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      const sender = typeof parsed.sender === 'string' ? parsed.sender.trim() : '';
+      const relay = typeof parsed.relay === 'string' ? parsed.relay.trim() : '';
+
+      await this.aiUsageService.logGeneration({
+        userId,
+        feature: 'companion.relay_summary',
+        promptKey: 'companion.relay_summary',
+        provider: 'openai',
+        model: aiConfig.openaiModel,
+        inputTokens: payload.usage?.prompt_tokens || 0,
+        outputTokens: payload.usage?.completion_tokens || 0,
+        totalTokens: payload.usage?.total_tokens || 0,
+      });
+
+      return {
+        senderSummary: sender || fallback.senderSummary,
+        replyRelay: relay || fallback.replyRelay,
+      };
+    } catch (err) {
+      this.logger.warn(`Relay text generation failed: ${(err as Error).message}`);
+      return fallback;
+    }
+  }
+
+  private async refineTagsFromChat(userId: string, sessionId: string): Promise<void> {
+    try {
+      const aiConfig = await this.adminConfigService.getAiConfig();
+      const apiKey = aiConfig.openaiApiKey;
+      if (!apiKey) return;
+
+      const recentMessages = await this.prisma.companionMessage.findMany({
+        where: { session_id: sessionId },
+        orderBy: { created_at: 'desc' },
+        take: 20,
+        select: { sender_type: true, ai_rewritten_text: true },
+      });
+      if (recentMessages.length < 6) return;
+
+      const transcript = recentMessages
+        .reverse()
+        .map(m => `${m.sender_type === 'user' ? '用户' : '对方'}: ${m.ai_rewritten_text}`)
+        .join('\n');
+
+      const existingTags = await this.prisma.userTag.findMany({
+        where: { user_id: userId, type: UserTagType.PUBLIC_VISIBLE },
+        select: { tag_name: true },
+      });
+      const existingNames = existingTags.map(t => t.tag_name).join('、');
+
+      const response = await fetch(
+        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: aiConfig.openaiModel,
+            temperature: 0.3,
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  '你是"有间"平台的画像分析师。根据用户最近的聊天记录，判断是否需要补充或更新用户的性格画像标签。',
+                  `用户现有标签：${existingNames || '暂无'}`,
+                  '',
+                  '规则：',
+                  '- 如果聊天内容体现了新的性格特征、情感倾向或兴趣方向，输出需要新增的标签',
+                  '- 如果聊天内容与现有标签矛盾，输出需要调整的标签',
+                  '- 如果没有明显新发现，输出空数组',
+                  '- 所有 tag_name 必须使用中文',
+                  '- 最多输出 3 个新标签',
+                  '- 严格只返回纯 JSON：{"new_tags":[{"tag_name":"","weight":0.0,"ai_justification":""}]}',
+                ].join('\n'),
+              },
+              {
+                role: 'user',
+                content: `最近聊天记录：\n${transcript}`,
+              },
+            ],
+          }),
+        },
+      );
+      if (!response.ok) return;
+
+      const payload = (await response.json()) as any;
+      const content = payload.choices?.[0]?.message?.content?.trim();
+      if (!content) return;
+
+      await this.aiUsageService.logGeneration({
+        userId,
+        feature: 'companion.tag_refinement',
+        promptKey: 'companion.tag_refinement',
+        provider: 'openai',
+        model: aiConfig.openaiModel,
+        inputTokens: payload.usage?.prompt_tokens || 0,
+        outputTokens: payload.usage?.completion_tokens || 0,
+        totalTokens: payload.usage?.total_tokens || 0,
+      });
+
+      const cleaned = content.replace(/```json?\n?|\n?```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      const newTags = Array.isArray(parsed.new_tags) ? parsed.new_tags : [];
+      if (newTags.length === 0) return;
+
+      for (const tag of newTags.slice(0, 3)) {
+        const tagName = String(tag.tag_name || '').trim();
+        if (!tagName || tagName.length > 20) continue;
+        const weight = Math.max(0, Math.min(1, Number(tag.weight) || 0.5));
+        await this.prisma.userTag.upsert({
+          where: {
+            user_id_type_tag_name: {
+              user_id: userId,
+              type: UserTagType.PUBLIC_VISIBLE,
+              tag_name: tagName,
+            },
+          },
+          create: {
+            user_id: userId,
+            type: UserTagType.PUBLIC_VISIBLE,
+            tag_name: tagName,
+            weight,
+            ai_justification: String(tag.ai_justification || '基于聊天内容推断'),
+          },
+          update: {
+            weight,
+            ai_justification: String(tag.ai_justification || '基于聊天内容更新'),
+          },
+        });
+      }
+
+      this.logger.log(`Refined ${newTags.length} tags for user ${userId} from chat`);
+    } catch (err) {
+      this.logger.warn(`Tag refinement error: ${(err as Error).message}`);
     }
   }
 

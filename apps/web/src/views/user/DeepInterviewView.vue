@@ -214,12 +214,12 @@ onBeforeUnmount(() => {
   <UserShell title="深度访谈" subtitle="重新生成你的画像" compact>
 
     <section class="panel message-panel">
-      <header class="panel-body" style="padding-bottom: 8px; display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
+      <header class="panel-body interview-header">
+        <div style="min-width: 0; flex: 1">
           <h2 class="panel-title">{{ done ? '你的深层画像已更新' : analyzing ? '正在更新画像' : '请认真回答 8 个问题' }}</h2>
-          <p v-if="!done && !analyzing" class="panel-subtitle">深度访谈包含更多探索，回答越真实，匹配越准确。系统会根据你的表达深度挖掘隐藏画像。</p>
+          <p v-if="!done && !analyzing" class="panel-subtitle">深度访谈包含更多探索，回答越真实，匹配越准确。</p>
         </div>
-        <button class="btn btn-ghost" type="button" @click="goReturn" style="font-size: 13px; color: #666; white-space: nowrap">暂时离开</button>
+        <button class="btn btn-ghost interview-leave-btn" type="button" @click="goReturn">暂时离开</button>
       </header>
 
       <div ref="chatBoxRef" class="message-list" style="padding: 0 16px 10px">
@@ -255,8 +255,8 @@ onBeforeUnmount(() => {
             :disabled="loading || sending"
             @keydown.enter.exact.prevent="submitAnswer"
           />
-          <div class="row" style="gap: 8px">
-            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skippingQuestion" @click="skipCurrentQuestion" style="font-size: 13px; white-space: nowrap">
+          <div class="interview-actions">
+            <button class="interview-skip-btn" type="button" :disabled="loading || sending || skippingQuestion" @click="skipCurrentQuestion">
               跳过此题
             </button>
             <button class="btn btn-primary" type="button" :disabled="loading || sending || !answer.trim()" @click="submitAnswer">
@@ -287,6 +287,54 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.interview-header {
+  padding-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.interview-leave-btn {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #888;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #e0e0e0;
+  background: rgba(0, 0, 0, 0.03);
+  white-space: nowrap;
+}
+
+.interview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.interview-skip-btn {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.interview-skip-btn:hover:not(:disabled) {
+  color: #666;
+}
+
+.interview-skip-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .loading-dots span {
   display: inline-block;
   font-size: 28px;

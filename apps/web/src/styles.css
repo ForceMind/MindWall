@@ -528,9 +528,16 @@ a {
   gap: 4px;
 }
 
+.screen:has(.message-panel) {
+  height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0;
+  gap: 8px;
+}
+
 .message-list {
   overflow: auto;
-  max-height: calc(100dvh - 220px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;

@@ -37,46 +37,46 @@ enum OnboardingSessionStatus {
 }
 
 model User {
-  id               String           @id @default(uuid()) @db.Uuid
-  auth_provider_id String           @unique
-  status           UserStatus       @default(onboarding)
-  created_at       DateTime         @default(now())
-  profile          UserProfile?
-  credential       UserCredential?
-  sessions         AuthSession[]
-  tags             UserTag[]
-  ai_logs          AiGenerationLog[]
-  interview_records OnboardingInterviewRecord[]
+  id                 String                       @id @default(uuid()) @db.Uuid
+  auth_provider_id   String                       @unique
+  status             UserStatus                   @default(onboarding)
+  created_at         DateTime                     @default(now())
+  profile            UserProfile?
+  credential         UserCredential?
+  sessions           AuthSession[]
+  tags               UserTag[]
+  ai_logs            AiGenerationLog[]
+  interview_records  OnboardingInterviewRecord[]
   interview_sessions OnboardingInterviewSession[]
-  matches_a        Match[]          @relation("MatchUserA")
-  matches_b        Match[]          @relation("MatchUserB")
-  sent_messages    SandboxMessage[] @relation("SentMessages")
-    companion_sessions CompanionSession[]
+  matches_a          Match[]                      @relation("MatchUserA")
+  matches_b          Match[]                      @relation("MatchUserB")
+  sent_messages      SandboxMessage[]             @relation("SentMessages")
+  companion_sessions CompanionSession[]
 
   @@index([status])
   @@map("users")
 }
 
 model UserCredential {
-  user_id        String   @id @db.Uuid
-  username       String   @unique @map("email") @db.VarChar(320)
-  password_hash  String   @db.Text
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user_id       String   @id @db.Uuid
+  username      String   @unique @map("email") @db.VarChar(320)
+  password_hash String   @db.Text
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("user_credentials")
 }
 
 model AuthSession {
-  id         String   @id @default(uuid()) @db.Uuid
-  user_id    String   @db.Uuid
-  token_hash String   @unique @db.VarChar(64)
-  expires_at DateTime
-  last_seen_at DateTime @default(now())
-  revoked_at DateTime?
-  created_at DateTime @default(now())
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String    @db.Uuid
+  token_hash   String    @unique @db.VarChar(64)
+  expires_at   DateTime
+  last_seen_at DateTime  @default(now())
+  revoked_at   DateTime?
+  created_at   DateTime  @default(now())
+  user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, expires_at])
   @@index([last_seen_at])
@@ -85,18 +85,18 @@ model AuthSession {
 }
 
 model UserProfile {
-  user_id        String   @id @db.Uuid
-  real_avatar    String?
-  real_name      String?
+  user_id          String   @id @db.Uuid
+  real_avatar      String?
+  real_name        String?
   anonymous_avatar String?
-  anonymous_name String?  @db.VarChar(64)
-  gender         String?  @db.VarChar(16)
-  age            Int?
-  city           String?  @db.VarChar(128)
-  is_wall_broken Boolean  @default(false)
-  updated_at     DateTime @updatedAt
-  created_at     DateTime @default(now())
-  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  anonymous_name   String?  @db.VarChar(64)
+  gender           String?  @db.VarChar(16)
+  age              Int?
+  city             String?  @db.VarChar(128)
+  is_wall_broken   Boolean  @default(false)
+  updated_at       DateTime @updatedAt
+  created_at       DateTime @default(now())
+  user             User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([city])
   @@map("user_profiles")
@@ -120,19 +120,19 @@ model UserTag {
 }
 
 model Match {
-  id              String           @id @default(uuid()) @db.Uuid
-  user_a_id       String           @db.Uuid
-  user_b_id       String           @db.Uuid
-  status          MatchStatus      @default(pending)
-  resonance_score Int              @default(0)
-  ai_match_reason String?          @db.Text
+  id                  String           @id @default(uuid()) @db.Uuid
+  user_a_id           String           @db.Uuid
+  user_b_id           String           @db.Uuid
+  status              MatchStatus      @default(pending)
+  resonance_score     Int              @default(0)
+  ai_match_reason     String?          @db.Text
   wall_break_consents Json?
-  wall_broken_at    DateTime?
-  created_at      DateTime         @default(now())
-  updated_at      DateTime         @updatedAt
-  user_a          User             @relation("MatchUserA", fields: [user_a_id], references: [id], onDelete: Cascade)
-  user_b          User             @relation("MatchUserB", fields: [user_b_id], references: [id], onDelete: Cascade)
-  messages        SandboxMessage[]
+  wall_broken_at      DateTime?
+  created_at          DateTime         @default(now())
+  updated_at          DateTime         @updatedAt
+  user_a              User             @relation("MatchUserA", fields: [user_a_id], references: [id], onDelete: Cascade)
+  user_b              User             @relation("MatchUserB", fields: [user_b_id], references: [id], onDelete: Cascade)
+  messages            SandboxMessage[]
 
   @@unique([user_a_id, user_b_id])
   @@index([status])
@@ -179,15 +179,15 @@ model AiGenerationLog {
 }
 
 model PromptTemplate {
-  id           String   @id @default(uuid()) @db.Uuid
-  key          String   @unique @db.VarChar(64)
-  name         String   @db.VarChar(128)
-  category     String   @db.VarChar(64)
-  content      String   @db.Text
-  version      Int      @default(1)
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id         String   @id @default(uuid()) @db.Uuid
+  key        String   @unique @db.VarChar(64)
+  name       String   @db.VarChar(128)
+  category   String   @db.VarChar(64)
+  content    String   @db.Text
+  version    Int      @default(1)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   @@index([category, is_active])
   @@map("prompt_templates")
@@ -226,35 +226,35 @@ model OnboardingInterviewSession {
   @@map("onboarding_interview_sessions")
 }
 
-
 model CompanionSession {
-  id                 String   @id @default(uuid()) @db.Uuid
-  user_id            String   @db.Uuid
-  persona_id         String   @db.VarChar(64)
-  persona_name       String   @db.VarChar(128)
-  persona_summary    String?  @db.Text
-  status             String   @default("active_sandbox") @db.VarChar(32)
-  relationship_stage Int      @default(1)
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
-  user               User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                 String             @id @default(uuid()) @db.Uuid
+  user_id            String             @db.Uuid
+  persona_id         String             @db.VarChar(64)
+  persona_name       String             @db.VarChar(128)
+  persona_summary    String?            @db.Text
+  status             String             @default("active_sandbox") @db.VarChar(32)
+  relationship_stage Int                @default(1)
+  created_at         DateTime           @default(now())
+  updated_at         DateTime           @updatedAt
+  user               User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
   messages           CompanionMessage[]
-  
+
   @@index([user_id])
   @@index([updated_at])
   @@map("companion_sessions")
 }
 
 model CompanionMessage {
-  id                 String   @id @default(uuid()) @db.Uuid
-  session_id         String   @db.Uuid
-  sender_type        String   @db.VarChar(32)
-  original_text      String?  @db.Text
-  ai_rewritten_text  String   @db.Text
-  ai_action          AiAction @default(passed)
-  created_at         DateTime @default(now())
-  session            CompanionSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
-  
+  id                String           @id @default(uuid()) @db.Uuid
+  session_id        String           @db.Uuid
+  sender_type       String           @db.VarChar(32)
+  original_text     String?          @db.Text
+  ai_rewritten_text String           @db.Text
+  relay_text        String?          @db.Text
+  ai_action         AiAction         @default(passed)
+  created_at        DateTime         @default(now())
+  session           CompanionSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
   @@index([session_id, created_at])
   @@map("companion_messages")
 }
