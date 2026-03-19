@@ -35,6 +35,7 @@ const noticeStore = useNoticeStore();
 
 const loading = ref(false);
 const sending = ref(false);
+const peerTyping = ref(false);
 const pageError = ref('');
 const isPeerOffline = ref(false);
 const inputText = ref('');
@@ -60,6 +61,7 @@ const messageIdSet = new Set<string>();
 const kind = computed(() => String(route.params.kind || 'match'));
 const id = computed(() => String(route.params.id || ''));
 const isMatchChat = computed(() => kind.value === 'match');
+const isPoolChat = computed(() => route.query.pool === '1');
 const canBreakWall = computed(() => wall.value.wallReady && !wall.value.wallBroken);
 
 function aiHistoryKey() { return `youjian.ai.chat.${id.value}`; }
@@ -503,10 +505,12 @@ async function sendMessage() {
   try {
     const history = buildCompanionHistory();
     
-      const payload = await askCompanion(userStore.token, actualPersonaId.value, history, aiSessionId.value);
-      // Fake thinking and typing delay for human-like realism
+      const payload = await askCompanion(userStore.token, actualPersonaId.value, history, aiSessionId.value, isPoolChat.value || undefined);
+      // Show "typing..." indicator for human-like realism
+      peerTyping.value = true;
       const delay = Math.min(1500 + (payload.reply.length * 50), 6000);
       await new Promise(r => setTimeout(r, delay));
+      peerTyping.value = false;
       if (payload.session_id) {
         aiSessionId.value = payload.session_id;
         // Silently update URL so future navigation loads the correct session
@@ -672,7 +676,11 @@ onBeforeUnmount(() => {
           <div class="bubble-meta">{{ formatTime(item.time) }}</div>
         </div>
 
-        <div v-if="sending" class="bubble system" style="opacity: 0.7; font-size: 12px; margin-top: 8px;">
+        <div v-if="peerTyping" class="bubble" style="opacity: 0.7; font-size: 12px; margin-top: 8px;">
+          <span class="loading-dots">对方正在输入...</span>
+        </div>
+
+        <div v-if="sending && !peerTyping" class="bubble system" style="opacity: 0.7; font-size: 12px; margin-top: 8px;">
           <span class="loading-dots">正在发送...</span>
         </div>
       </div>

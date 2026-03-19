@@ -3,6 +3,21 @@ import { PRESET_PERSONAS } from '../companion/personas';
 import { MatchStatus, UserTagType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+const CITY_LANDMARKS: Record<string, string[]> = {
+  '北京': ['胡同', '后海', '故宫', '鼓楼'],
+  '上海': ['外滩', '弄堂', '梧桐', '静安'],
+  '广州': ['骑楼', '珠江', '茶楼', '西关'],
+  '深圳': ['南山', '湾区', '梅林', '蛇口'],
+  '成都': ['锦里', '太古', '宽窄', '玉林'],
+  '杭州': ['西湖', '拱墅', '钱塘', '断桥'],
+  '南京': ['鸡鸣', '玄武', '秦淮', '紫金'],
+  '重庆': ['山城', '洪崖', '两江', '磁器'],
+  '长沙': ['橘洲', '岳麓', '湘江', '天心'],
+};
+
+const GENERIC_LANDMARKS = ['晨曦', '星尘', '流光', '月影', '霜降', '烟雨', '云间', '潮汐'];
+const PLACE_SUFFIXES = ['信箱', '电台', '旅舍', '书屋', '茶馆', '驿站', '灯塔', '渡口'];
+
 @Injectable()
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -34,7 +49,8 @@ export class ContactsService {
     if (!city) {
       return {
         city_scope: null,
-        candidates: await this.buildAiCandidates(me.tags, null, userId),
+        candidates: await this.buildDiscoveryAiCandidates(me.tags, null, userId),
+        ai_chat_candidates: await this.buildAiChatCandidates(userId, null),
       };
     }
 
@@ -152,7 +168,8 @@ export class ContactsService {
 
     return {
       city_scope: city,
-      candidates: [...candidates, ...await this.buildAiCandidates(me.tags, city, userId)],
+      candidates: [...candidates, ...await this.buildDiscoveryAiCandidates(me.tags, city, userId)],
+      ai_chat_candidates: await this.buildAiChatCandidates(userId, city),
     };
   }
 
@@ -190,6 +207,8 @@ export class ContactsService {
         where: {
           user_id: userId,
           status: { in: aiStatuses },
+          // Exclude AI陪聊 sessions from 我的会话
+          NOT: { status: 'active_chat' },
         },
         orderBy: [{ updated_at: 'desc' }],
       })
@@ -388,7 +407,10 @@ export class ContactsService {
     return Math.max(0, Math.min(100, Math.round(overlap * 100 - riskPenalty)));
   }
 
-  private async buildAiCandidates(
+  /**
+   * AI假用户 mixed into 发现匹配: real-user naming, disclosure '匹配对象', own personas
+   */
+  private async buildDiscoveryAiCandidates(
     selfTags: Array<{ tag_name: string; weight: number }>,
     city?: string | null,
     userId?: string,
@@ -398,18 +420,20 @@ export class ContactsService {
       .slice(0, 2)
       .map((item) => item.tag_name);
 
-    // Pick AI personas with a deterministic seed so the same user gets stable candidates
+    // 4-hour rotation: AI fake users come and go to simulate real online activity
+    const rotationSeed = Math.floor(Date.now() / (4 * 3600000));
     const userSeed = this.hashSeed(userId || 'default');
     const nonPsych = PRESET_PERSONAS.filter(p => p.id !== 'ai_psychologist');
     const shuffled = [...nonPsych].sort((a, b) => {
-      const ha = this.hashSeed(a.id + userId);
-      const hb = this.hashSeed(b.id + userId);
+      const ha = this.hashSeed(a.id + userId + rotationSeed);
+      const hb = this.hashSeed(b.id + userId + rotationSeed);
       return ha - hb;
     });
-    const aiCount = (userSeed % 3) + 1;
+    // 1-3 AI fake users that blend in with real users, rotates every 4 hours
+    const aiCount = (this.hashSeed(`${userId}:disc:${rotationSeed}`) % 3) + 1;
     const aiCandidates = shuffled.slice(0, aiCount);
 
-    // Always include the psychologist (AI counselor)
+    // Psychologist is always shown (clearly labeled)
     const psychologist = PRESET_PERSONAS.find(p => p.id === 'ai_psychologist');
 
     const personas = [
@@ -420,12 +444,13 @@ export class ContactsService {
         summary: psychologist.summary,
         disclosure: 'AI 访谈师',
       }] : []),
+      // AI假用户 get '匹配对象' disclosure to blend in with real users
       ...aiCandidates.map(p => ({
         id: p.id,
         name: this.generateDynamicName(userId || '', p.id, city || null),
         tags: [...p.tags, ...seedTags].slice(0, 4),
         summary: p.summary,
-        disclosure: 'AI 陪聊',
+        disclosure: '匹配对象',
       })),
     ];
 
@@ -491,9 +516,56 @@ export class ContactsService {
     return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
   }
 
+  /**
+   * AI陪聊 pool: city-based naming, 2-6 AIs with hourly rotation
+   */
+  private async buildAiChatCandidates(userId: string, city: string | null) {
+    const hourSeed = Math.floor(Date.now() / 3600000);
+    const combinedSeed = this.hashSeed(`${userId}:chat_pool:${hourSeed}`);
+
+    // 2-6 AIs, changes hourly to simulate online/offline
+    const count = (combinedSeed % 5) + 2;
+
+    const nonPsych = PRESET_PERSONAS.filter(p => p.id !== 'ai_psychologist');
+    const shuffled = [...nonPsych].sort((a, b) => {
+      return this.hashSeed(a.id + userId + hourSeed) - this.hashSeed(b.id + userId + hourSeed);
+    });
+    const selected = shuffled.slice(0, count);
+
+    const existingSessions = await this.prisma.companionSession.findMany({
+      where: {
+        user_id: userId,
+        persona_id: { in: selected.map(p => p.id) },
+        status: 'active_chat',
+      },
+      select: { id: true, persona_id: true },
+    });
+    const sessionByPersona = new Map(existingSessions.map(s => [s.persona_id, s.id]));
+
+    return selected.map((p, idx) => ({
+      candidate_id: p.id,
+      candidate_type: 'ai' as const,
+      is_ai: true,
+      disclosure: 'AI 陪聊',
+      city: null,
+      avatar: this.buildPersonaAvatar(p.id, p.name),
+      name: this.generateCityBasedName(userId, p.id, city),
+      score: Math.max(50, 80 - idx * 5),
+      has_match: sessionByPersona.has(p.id),
+      match_id: sessionByPersona.get(p.id) || null,
+      match_status: null,
+      resonance_score: null,
+      public_tags: p.tags.slice(0, 4).map(tagName => ({
+        tag_name: tagName,
+        weight: 0.72,
+        ai_justification: p.summary,
+      })),
+    }));
+  }
+
   private generateDynamicName(userId: string, personaId: string, city: string | null): string {
     const seed = this.hashSeed(`${userId}:${personaId}`);
-    // Use the same naming rules as real users (onboarding.service buildAnonymousIdentity)
+    // Same naming rules as real users (onboarding.service buildAnonymousIdentity)
     const prefixes = [
       '雾岛', '微澜', '晚风', '晨岚', '星屿',
       '松影', '白砂', '林深', '海盐', '青曜',
@@ -507,6 +579,14 @@ export class ContactsService {
     const suffix = suffixes[(seed >>> 3) % suffixes.length];
     const serial = String(((seed >>> 7) % 89) + 11).padStart(2, '0');
     return `${prefix}${suffix}${serial}`;
+  }
+
+  private generateCityBasedName(userId: string, personaId: string, city: string | null): string {
+    const seed = this.hashSeed(`${userId}:${personaId}:city`);
+    const landmarks = (city && CITY_LANDMARKS[city]) || GENERIC_LANDMARKS;
+    const landmark = landmarks[seed % landmarks.length];
+    const suffix = PLACE_SUFFIXES[(seed >>> 4) % PLACE_SUFFIXES.length];
+    return `${landmark}${suffix}`;
   }
 
   private hashSeed(text: string): number {

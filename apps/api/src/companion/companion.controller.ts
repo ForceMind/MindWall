@@ -25,6 +25,7 @@ export class CompanionController {
       companion_id?: string;
       session_id?: string;
       history?: Array<{ role?: string; text?: string }>;
+      is_chat_pool?: boolean;
     },
   ) {
     return this.companionService.respond(user.userId, body);

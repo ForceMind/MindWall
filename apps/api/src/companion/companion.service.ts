@@ -16,6 +16,7 @@ interface CompanionRequestBody {
   history?: CompanionTurnInput[];
   companion_id?: string;
   session_id?: string;
+  is_chat_pool?: boolean;
 }
 
 interface DynamicPersonaContext {
@@ -95,8 +96,11 @@ export class CompanionService {
       }
       body.companion_id = companionSession.persona_id;
     } else {
+      const statuses = body.is_chat_pool
+        ? ['active_chat']
+        : ['active', 'active_sandbox'];
       companionSession = await this.prisma.companionSession.findFirst({
-        where: { user_id: userId, persona_id: body.companion_id, status: { in: ['active', 'active_sandbox'] } },
+        where: { user_id: userId, persona_id: body.companion_id, status: { in: statuses } },
         orderBy: { updated_at: 'desc' }
       });
       if (!companionSession) {
@@ -105,7 +109,7 @@ export class CompanionService {
             user_id: userId,
             persona_id: body.companion_id!,
             persona_name: 'AI Companion',
-            status: 'active_sandbox',
+            status: body.is_chat_pool ? 'active_chat' : 'active_sandbox',
           }
         });
       }
@@ -169,7 +173,8 @@ export class CompanionService {
       throw new BadRequestException('At least one user message is required.');
     }
 
-    const persona = this.resolvePersona(body.companion_id, userId, profile?.city || null);
+    const isChatPool = body.is_chat_pool || companionSession.status === 'active_chat';
+    const persona = this.resolvePersona(body.companion_id, userId, profile?.city || null, isChatPool);
     if (companionSession.persona_name === 'AI Companion') {
       await this.prisma.companionSession.update({
         where: { id: companionSession.id },
@@ -209,6 +214,27 @@ export class CompanionService {
       '8) 像微信聊天而不是写作文，绝对不能长篇大论。',
     ].join('\n');
 
+    // AI假用户 (non chat-pool, non psychologist): hide persona ID to sound more like a real person
+    const isDiscoveryFake = !isChatPool && persona.id !== 'ai_psychologist';
+    const personaBlock = isDiscoveryFake
+      ? [
+          `你的名字: ${persona.name}`,
+          `你的性格特点:`,
+          `- 沟通节奏: ${persona.rhythm}`,
+          `- 情绪基调: ${persona.emotion}`,
+          `- 冲突处理: ${persona.conflict}`,
+        ]
+      : [
+          `当前角色代号: ${persona.id}`,
+          `当前角色名称: ${persona.name}`,
+          `角色心理画像:`,
+          `- 沟通节奏: ${persona.rhythm}`,
+          `- 依恋风格: ${persona.attachment}`,
+          `- 边界偏好: ${persona.boundary}`,
+          `- 情绪基调: ${persona.emotion}`,
+          `- 冲突处理: ${persona.conflict}`,
+        ];
+
     const systemPrompt = [
       personaBasePrompt,
       '',
@@ -216,14 +242,7 @@ export class CompanionService {
       '',
       hardConstraints,
       '',
-      `当前角色代号: ${persona.id}`,
-      `当前角色名称: ${persona.name}`,
-      `角色心理画像:`,
-      `- 沟通节奏: ${persona.rhythm}`,
-      `- 依恋风格: ${persona.attachment}`,
-      `- 边界偏好: ${persona.boundary}`,
-      `- 情绪基调: ${persona.emotion}`,
-      `- 冲突处理: ${persona.conflict}`,
+      ...personaBlock,
       '',
       ...this.buildDynamicPersonaPromptLines(dynamicCtx, persona),
       '',
@@ -334,7 +353,7 @@ export class CompanionService {
       .slice(-20);
   }
 
-  private resolvePersona(companionId: string | undefined, userId: string, city: string | null): BasePersona {
+  private resolvePersona(companionId: string | undefined, userId: string, city: string | null, isChatPool = false): BasePersona {
     const rawId = (companionId || '').trim().toLowerCase();
     const normalized = rawId.replace(/_\d{10,}_\d+$/, ''); // Strip old dynamic timestamp_random suffix only
 
@@ -356,8 +375,10 @@ export class CompanionService {
       return archetype;
     }
 
-    // Generate a unique anonymous name per user+persona combination
-    const dynamicName = this.generatePersonaName(userId, rawId, city);
+    // AI陪聊 uses city-based naming, AI假用户 uses real-user naming
+    const dynamicName = isChatPool
+      ? this.generateCityBasedName(userId, rawId, city)
+      : this.generatePersonaName(userId, rawId, city);
     return { ...archetype, name: dynamicName };
   }
 
@@ -386,6 +407,28 @@ export class CompanionService {
       hash = Math.imul(hash, 16777619);
     }
     return hash >>> 0;
+  }
+
+  private generateCityBasedName(userId: string, personaId: string, city: string | null): string {
+    const CITY_LANDMARKS: Record<string, string[]> = {
+      '北京': ['胡同', '后海', '故宫', '鼓楼'],
+      '上海': ['外滩', '弄堂', '梧桐', '静安'],
+      '广州': ['骑楼', '珠江', '茶楼', '西关'],
+      '深圳': ['南山', '湾区', '梅林', '蛇口'],
+      '成都': ['锦里', '太古', '宽窄', '玉林'],
+      '杭州': ['西湖', '拱墅', '钱塘', '断桥'],
+      '南京': ['鸡鸣', '玄武', '秦淮', '紫金'],
+      '重庆': ['山城', '洪崖', '两江', '磁器'],
+      '长沙': ['橘洲', '岳麓', '湘江', '天心'],
+    };
+    const GENERIC_LANDMARKS = ['晨曦', '星尘', '流光', '月影', '霜降', '烟雨', '云间', '潮汐'];
+    const PLACE_SUFFIXES = ['信箱', '电台', '旅舍', '书屋', '茶馆', '驿站', '灯塔', '渡口'];
+
+    const seed = this.hashSeed(`${userId}:${personaId}:city`);
+    const landmarks = (city && CITY_LANDMARKS[city]) || GENERIC_LANDMARKS;
+    const landmark = landmarks[seed % landmarks.length];
+    const suffix = PLACE_SUFFIXES[(seed >>> 4) % PLACE_SUFFIXES.length];
+    return `${landmark}${suffix}`;
   }
 
   private buildFallbackReply(

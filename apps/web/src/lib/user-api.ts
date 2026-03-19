@@ -215,6 +215,7 @@ export function fetchCandidates(token: string) {
   return httpRequest<{
     city_scope: string | null;
     candidates: CandidateContact[];
+    ai_chat_candidates: CandidateContact[];
   }>('/contacts/me/candidates', {
     token,
   });
@@ -276,6 +277,7 @@ export function askCompanion(
   companionId: string,
   history: Array<{ role: string; text: string }>,
   sessionId?: string,
+  isChatPool?: boolean,
 ) {
   return httpRequest<{
     contact_id: string;
@@ -293,6 +295,7 @@ export function askCompanion(
       companion_id: companionId,
       session_id: sessionId,
       history,
+      is_chat_pool: isChatPool || undefined,
     },
   });
 }
