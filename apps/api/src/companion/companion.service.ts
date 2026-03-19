@@ -325,12 +325,15 @@ export class CompanionService {
 
       const resonanceScore = Math.min(userMsgCount * 5, 100);
       const wallBroken = isChatPool || resonanceScore >= 100;
+      const inSandbox = !wallBroken;
       return {
         session_id: companionSession.id,
         mode: 'simulated_contact',
         contact_id: persona.id,
         contact_name: persona.name,
         reply,
+        sender_summary: inSandbox ? this.summarizeForSender(lastUserMessage, resonanceScore) : undefined,
+        reply_relay: inSandbox ? this.summarizeForRelay(reply, resonanceScore) : undefined,
         resonance_score: resonanceScore,
         wall_ready: !wallBroken && resonanceScore >= 85,
         wall_broken: wallBroken,
@@ -372,12 +375,15 @@ export class CompanionService {
 
     const resonanceScore = Math.min(userMsgCount * 5, 100);
     const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
+    const inSandbox = !wallBroken;
     return {
       session_id: companionSession.id,
       mode: 'simulated_contact',
       contact_id: persona.id,
       contact_name: persona.name,
       reply,
+      sender_summary: inSandbox ? this.summarizeForSender(lastUserMessage, resonanceScore) : undefined,
+      reply_relay: inSandbox ? this.summarizeForRelay(reply, resonanceScore) : undefined,
       resonance_score: resonanceScore,
       wall_ready: !wallBroken && resonanceScore >= 85,
       wall_broken: wallBroken,

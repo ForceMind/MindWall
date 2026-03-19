@@ -1142,22 +1142,24 @@ export class OnboardingService {
       return '';
     }
 
+    // Extract a short anchor from the user's answer for context-aware follow-up
+    const anchor = text.slice(0, 20);
     const focusType = turnIndex % this.interviewFocuses.length;
     let candidate = '';
-    
+
     switch (focusType) {
       case 0:
-        candidate = '这似乎对你有挺深的影响。能具体聊聊，它如何展现或塑造了现在的你吗？';
+        candidate = `你提到了「${anchor}」，能多聊聊这个对现在的你产生了什么影响吗？`;
         break;
       case 1:
-        candidate = '原来如此。那在平时的感情和关系里，什么样的相处模式会让你觉得舒服且安全？';
+        candidate = `「${anchor}」挺有意思的。在你看来，什么样的人最容易让你放下戒备？`;
         break;
       case 2:
-        candidate = '听起来挺有感触的。这段经历最核心地教会了你什么？';
+        candidate = `关于「${anchor}」，如果重新来一次，你会有不一样的选择吗？`;
         break;
       case 3:
       default:
-        candidate = '我大概理解了。那你最希望别人能越过表面现象，去看到你内心深处的哪一面？';
+        candidate = `你说的「${anchor}」让我挺好奇的，在你内心深处最想被理解的部分是什么？`;
         break;
     }
 
@@ -1195,9 +1197,30 @@ export class OnboardingService {
       ) {
         return true;
       }
+
+      // Keyword overlap detection: extract meaningful Chinese phrases and check overlap
+      const candidateKeywords = this.extractKeyPhrases(normalizedCandidate);
+      const previousKeywords = this.extractKeyPhrases(normalizedPrevious);
+      if (candidateKeywords.length >= 2 && previousKeywords.length >= 2) {
+        const overlap = candidateKeywords.filter(k => previousKeywords.includes(k)).length;
+        if (overlap >= 2) {
+          return true;
+        }
+      }
     }
 
     return false;
+  }
+
+  private extractKeyPhrases(normalizedText: string): string[] {
+    // Extract 2-4 char meaningful phrases that indicate question intent
+    const intentPatterns = [
+      '亲密关系', '相处方式', '相处模式', '舒服', '安全',
+      '感到舒服', '觉得舒服', '影响', '塑造', '经历',
+      '教会', '内心', '深处', '看到', '珍视',
+      '成就感', '开心', '特质', '认识你', '关系',
+    ];
+    return intentPatterns.filter(p => normalizedText.includes(p));
   }
 
   private isClosedEndedQuestion(candidate: string) {
