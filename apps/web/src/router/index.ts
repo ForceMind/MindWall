@@ -24,6 +24,7 @@ const AdminPromptsView = () => import('@/views/admin/AdminPromptsView.vue');
 const AdminConfigView = () => import('@/views/admin/AdminConfigView.vue');
 const AdminLogsView = () => import('@/views/admin/AdminLogsView.vue');
 const AdminChatsView = () => import('@/views/admin/AdminChatsView.vue');
+const AdminChatDetailView = () => import('@/views/admin/AdminChatDetailView.vue');
 
 function resolveUserRoute(userStore: ReturnType<typeof useUserSessionStore>) {
   const viewer = userStore.viewer;
@@ -77,6 +78,7 @@ const router = createRouter({
     { path: '/admin/prompts', component: AdminPromptsView, meta: { requiresAdmin: true } },
     { path: '/admin/config', component: AdminConfigView, meta: { requiresAdmin: true } },
     { path: '/admin/chats', component: AdminChatsView, meta: { requiresAdmin: true } },
+    { path: '/admin/chats/:type/:id', component: AdminChatDetailView, meta: { requiresAdmin: true } },
     { path: '/admin/logs', component: AdminLogsView, meta: { requiresAdmin: true } },
 
     { path: '/:pathMatch(.*)*', redirect: '/matches' },

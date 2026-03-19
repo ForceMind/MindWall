@@ -592,14 +592,46 @@ export class AdminDashboardService {
     };
   }
 
-  async listMatches(page: number, limit: number) {
+  async listMatches(page: number, limit: number, tab?: string, search?: string) {
     const safePage = Math.max(1, Math.round(page || 1));
     const safeLimit = Math.max(1, Math.min(100, Math.round(limit || 20)));
     const skip = (safePage - 1) * safeLimit;
 
+    const where: Record<string, unknown> = {};
+
+    if (tab === 'active') {
+      where.status = { in: ['pending', 'active_sandbox'] };
+    } else if (tab === 'history') {
+      where.status = { in: ['wall_broken', 'rejected'] };
+    }
+
+    if (search && search.trim()) {
+      const s = search.trim();
+      const matchingUsers = await this.prisma.user.findMany({
+        where: {
+          OR: [
+            { credential: { username: { contains: s, mode: 'insensitive' } } },
+            { profile: { anonymous_name: { contains: s, mode: 'insensitive' } } },
+          ],
+        },
+        select: { id: true },
+        take: 100,
+      });
+      const userIds = matchingUsers.map(u => u.id);
+      if (userIds.length > 0) {
+        where.OR = [
+          { user_a_id: { in: userIds } },
+          { user_b_id: { in: userIds } },
+        ];
+      } else {
+        return { page: safePage, limit: safeLimit, total: 0, matches: [] };
+      }
+    }
+
     const [total, matches] = await Promise.all([
-      this.prisma.match.count(),
+      this.prisma.match.count({ where }),
       this.prisma.match.findMany({
+        where,
         skip,
         take: safeLimit,
         orderBy: { updated_at: 'desc' },
@@ -655,6 +687,155 @@ export class AdminDashboardService {
         wall_broken_at: m.wall_broken_at,
         user_a: { user_id: m.user_a_id, ...userMap.get(m.user_a_id) },
         user_b: { user_id: m.user_b_id, ...userMap.get(m.user_b_id) },
+      })),
+    };
+  }
+
+  async listCompanionSessions(page: number, limit: number, tab?: string, search?: string) {
+    const safePage = Math.max(1, Math.round(page || 1));
+    const safeLimit = Math.max(1, Math.min(100, Math.round(limit || 20)));
+    const skip = (safePage - 1) * safeLimit;
+
+    const where: Record<string, unknown> = {};
+
+    if (tab === 'active') {
+      where.status = { in: ['active', 'active_sandbox', 'active_chat'] };
+    } else if (tab === 'history') {
+      where.status = { notIn: ['active', 'active_sandbox', 'active_chat'] };
+    }
+
+    if (search && search.trim()) {
+      const s = search.trim();
+      const matchingUsers = await this.prisma.user.findMany({
+        where: {
+          OR: [
+            { credential: { username: { contains: s, mode: 'insensitive' } } },
+            { profile: { anonymous_name: { contains: s, mode: 'insensitive' } } },
+          ],
+        },
+        select: { id: true },
+        take: 100,
+      });
+      const userIds = matchingUsers.map(u => u.id);
+      if (userIds.length > 0) {
+        where.user_id = { in: userIds };
+      } else {
+        return { page: safePage, limit: safeLimit, total: 0, sessions: [] };
+      }
+    }
+
+    const [total, sessions] = await Promise.all([
+      this.prisma.companionSession.count({ where }),
+      this.prisma.companionSession.findMany({
+        where,
+        skip,
+        take: safeLimit,
+        orderBy: { updated_at: 'desc' },
+        select: {
+          id: true,
+          user_id: true,
+          persona_id: true,
+          persona_name: true,
+          status: true,
+          created_at: true,
+          updated_at: true,
+          _count: { select: { messages: true } },
+        },
+      }),
+    ]);
+
+    const userIds = [...new Set(sessions.map((s) => s.user_id))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        credential: { select: { username: true } },
+        profile: { select: { anonymous_name: true, city: true } },
+      },
+    });
+    const userMap = new Map(
+      users.map((u) => [u.id, {
+        username: u.credential?.username || null,
+        anonymous_name: u.profile?.anonymous_name || null,
+        city: u.profile?.city || null,
+      }]),
+    );
+
+    return {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        user_id: s.user_id,
+        persona_id: s.persona_id,
+        persona_name: s.persona_name,
+        status: s.status,
+        message_count: s._count.messages,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        user: { user_id: s.user_id, ...userMap.get(s.user_id) },
+      })),
+    };
+  }
+
+  async getCompanionSessionMessages(sessionId: string) {
+    const session = await this.prisma.companionSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        user_id: true,
+        persona_id: true,
+        persona_name: true,
+        status: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Companion session not found.');
+    }
+
+    const messages = await this.prisma.companionMessage.findMany({
+      where: { session_id: sessionId },
+      orderBy: { created_at: 'asc' },
+      select: {
+        id: true,
+        sender_type: true,
+        original_text: true,
+        ai_rewritten_text: true,
+        ai_action: true,
+        created_at: true,
+      },
+    });
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: session.user_id },
+      select: {
+        credential: { select: { username: true } },
+        profile: { select: { anonymous_name: true } },
+      },
+    });
+
+    const userName = user?.credential?.username || user?.profile?.anonymous_name || session.user_id.slice(0, 8);
+
+    return {
+      session: {
+        id: session.id,
+        user_id: session.user_id,
+        user_name: userName,
+        persona_id: session.persona_id,
+        persona_name: session.persona_name,
+        status: session.status,
+      },
+      total: messages.length,
+      messages: messages.map((m) => ({
+        id: m.id,
+        sender_type: m.sender_type,
+        sender_name: m.sender_type === 'user' ? userName : session.persona_name,
+        original_text: m.original_text,
+        ai_rewritten_text: m.ai_rewritten_text,
+        ai_action: m.ai_action,
+        created_at: m.created_at,
       })),
     };
   }

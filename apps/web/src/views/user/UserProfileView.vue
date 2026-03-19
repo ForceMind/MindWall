@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import UserShell from '@/components/UserShell.vue';
 import { useUserSessionStore } from '@/stores/user-session';
@@ -17,6 +17,20 @@ const profileAvatar = computed(() => userStore.viewer?.profile?.anonymous_avatar
 const city = computed(() => userStore.viewer?.profile?.city || '未设置');
 const gender = computed(() => userStore.viewer?.profile?.gender || '未知');
 const age = computed(() => userStore.viewer?.profile?.age || 0);
+const userId = computed(() => userStore.viewer?.user.id || '');
+const displayId = computed(() => {
+  const raw = userId.value.replace(/-/g, '').toUpperCase();
+  return raw ? `MW-${raw.slice(0, 8)}` : '';
+});
+
+const idCopied = ref(false);
+function copyId() {
+  if (!displayId.value) return;
+  navigator.clipboard.writeText(displayId.value).then(() => {
+    idCopied.value = true;
+    setTimeout(() => { idCopied.value = false; }, 1500);
+  });
+}
 
 async function handleLogout() {
   await userStore.logout();
@@ -30,6 +44,11 @@ async function handleLogout() {
       <div class="panel-body column" style="align-items: center; padding: 32px 16px;">
         <img v-if="profileAvatar" :src="profileAvatar" alt="avatar" class="avatar" style="width: 80px; height: 80px;" />
         <div style="font-weight: 700; font-size: 20px; margin-top: 12px;">{{ profileName }}</div>
+        <div v-if="displayId" class="muted" style="margin-top: 6px; font-size: 12px; cursor: pointer; user-select: all" @click="copyId">
+          ID: {{ displayId }}
+          <span v-if="idCopied" style="color: var(--success); margin-left: 4px">已复制</span>
+          <span v-else style="opacity: 0.5; margin-left: 4px">点击复制</span>
+        </div>
         <div class="muted" style="margin-top: 4px; font-size: 13px;">(完成深度访谈可让AI自动生成新的专属昵称和头像)</div>
         <div class="muted" style="margin-top: 8px;">{{ city }} · {{ gender === 'male' ? '男' : gender === 'female' ? '女' : '未知' }} · {{ age }}岁</div>
       </div>

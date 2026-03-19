@@ -287,13 +287,69 @@ export interface AdminMatchMessage {
   created_at: string;
 }
 
-export function fetchAdminMatches(token: string, page: number, limit: number) {
+export interface AdminCompanionSession {
+  id: string;
+  user_id: string;
+  persona_id: string;
+  persona_name: string;
+  status: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  user: { user_id: string; username: string | null; anonymous_name: string | null; city: string | null };
+}
+
+export interface AdminCompanionMessage {
+  id: string;
+  sender_type: string;
+  sender_name: string;
+  original_text: string | null;
+  ai_rewritten_text: string;
+  ai_action: string;
+  created_at: string;
+}
+
+export function fetchAdminMatches(token: string, page: number, limit: number, tab = '', search = '') {
+  let url = `/admin/dashboard/matches?page=${page}&limit=${limit}`;
+  if (tab) url += `&tab=${encodeURIComponent(tab)}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
   return httpRequest<{
     page: number;
     limit: number;
     total: number;
     matches: AdminMatch[];
-  }>(`/admin/dashboard/matches?page=${page}&limit=${limit}`, {
+  }>(url, {
+    headers: adminHeaders(token),
+  });
+}
+
+export function fetchAdminCompanionSessions(token: string, page: number, limit: number, tab = '', search = '') {
+  let url = `/admin/dashboard/companion-sessions?page=${page}&limit=${limit}`;
+  if (tab) url += `&tab=${encodeURIComponent(tab)}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+  return httpRequest<{
+    page: number;
+    limit: number;
+    total: number;
+    sessions: AdminCompanionSession[];
+  }>(url, {
+    headers: adminHeaders(token),
+  });
+}
+
+export function fetchAdminCompanionSessionMessages(token: string, sessionId: string) {
+  return httpRequest<{
+    session: {
+      id: string;
+      user_id: string;
+      user_name: string;
+      persona_id: string;
+      persona_name: string;
+      status: string;
+    };
+    total: number;
+    messages: AdminCompanionMessage[];
+  }>(`/admin/dashboard/companion-sessions/${sessionId}/messages`, {
     headers: adminHeaders(token),
   });
 }

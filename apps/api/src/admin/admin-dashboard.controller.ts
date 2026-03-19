@@ -71,11 +71,35 @@ export class AdminDashboardController {
   async matches(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('tab') tab?: string,
+    @Query('search') search?: string,
   ) {
     return this.adminDashboardService.listMatches(
       Number(page || 1),
       Number(limit || 20),
+      tab,
+      search,
     );
+  }
+
+  @Get('companion-sessions')
+  async companionSessions(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('tab') tab?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.adminDashboardService.listCompanionSessions(
+      Number(page || 1),
+      Number(limit || 20),
+      tab,
+      search,
+    );
+  }
+
+  @Get('companion-sessions/:sessionId/messages')
+  async companionSessionMessages(@Param('sessionId') sessionId: string) {
+    return this.adminDashboardService.getCompanionSessionMessages(sessionId);
   }
 
   @Get('matches/:matchId/messages')
