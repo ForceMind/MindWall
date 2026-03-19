@@ -860,7 +860,7 @@ export class CompanionService {
               },
               {
                 role: 'user',
-                content: `用户发送的消息："${userMessage.slice(0, 200)}"\n对方的回复："${aiReply.slice(0, 200)}"\n\n请输出JSON：{"sender":"你...","relay":"对方..."}`,
+                content: `用户发送的消息："${userMessage.slice(0, 200)}"\n对方的回复："${aiReply.slice(0, 200)}"\n\n请用自然语言转述以上内容，输出JSON格式：{"sender":"你向对方做了什么（8-20字描述）","relay":"对方向你说了什么（8-20字描述）"}`,
               },
             ],
           }),
@@ -876,6 +876,11 @@ export class CompanionService {
       const parsed = JSON.parse(cleaned);
       const sender = typeof parsed.sender === 'string' ? parsed.sender.trim() : '';
       const relay = typeof parsed.relay === 'string' ? parsed.relay.trim() : '';
+
+      // Reject outputs that are too short or look like copied placeholders
+      const isPlaceholder = (s: string) =>
+        !s || s.length < 5 || /^(你|对方)\.{2,}$/.test(s) || /^(你|对方)(…+|\.\.\.)$/.test(s);
+      if (isPlaceholder(sender) || isPlaceholder(relay)) return fallback;
 
       await this.aiUsageService.logGeneration({
         userId,
