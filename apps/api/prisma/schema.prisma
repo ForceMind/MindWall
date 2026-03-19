@@ -228,16 +228,17 @@ model OnboardingInterviewSession {
 
 
 model CompanionSession {
-  id              String   @id @default(uuid()) @db.Uuid
-  user_id         String   @db.Uuid
-  persona_id      String   @db.VarChar(64)
-  persona_name    String   @db.VarChar(128)
-  persona_summary String?  @db.Text
-  status          String   @default("active_sandbox") @db.VarChar(32)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
-  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  messages        CompanionMessage[]
+  id                 String   @id @default(uuid()) @db.Uuid
+  user_id            String   @db.Uuid
+  persona_id         String   @db.VarChar(64)
+  persona_name       String   @db.VarChar(128)
+  persona_summary    String?  @db.Text
+  status             String   @default("active_sandbox") @db.VarChar(32)
+  relationship_stage Int      @default(1)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  user               User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  messages           CompanionMessage[]
   
   @@index([user_id])
   @@index([updated_at])

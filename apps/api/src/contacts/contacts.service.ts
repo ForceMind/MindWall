@@ -211,6 +211,9 @@ export class ContactsService {
           NOT: { status: 'active_chat' },
         },
         orderBy: [{ updated_at: 'desc' }],
+        include: {
+          _count: { select: { messages: { where: { sender_type: 'user' } } } },
+        },
       })
     ]);
 
@@ -300,16 +303,19 @@ export class ContactsService {
         const displayName = session.persona_name && session.persona_name !== 'AI Companion'
           ? session.persona_name
           : personaDef?.name || 'AI Companion';
-        // All AI companion conversations are direct chat (wall_broken)
+        // Compute resonance from user message count, same logic as companion.service
+        const userMsgCount = (session as any)._count?.messages ?? 0;
+        const resonanceScore = Math.min(userMsgCount * 5, 100);
+        const wallBroken = resonanceScore >= 100;
         return {
           match_id: session.id,
           candidate_type: 'ai',
           is_ai: true,
-          disclosure: 'AI 假用户',
+          disclosure: '匹配对象',
           name: displayName,
           avatar: this.buildPersonaAvatar(session.persona_id, displayName),
-          status: 'wall_broken',
-          resonance_score: 0,
+          status: wallBroken ? 'wall_broken' : 'active_sandbox',
+          resonance_score: resonanceScore,
           ai_match_reason: null,
           updated_at: session.updated_at,
           public_tags: [],
@@ -437,9 +443,9 @@ export class ContactsService {
 
     const psychologist = PRESET_PERSONAS.find(p => p.id === 'ai_psychologist');
 
-    // Psychologist only shown after user completes deep interview
+    // Psychologist only shown after user completes deep interview (total_questions >= 8)
     const hasInterview = userId ? await this.prisma.onboardingInterviewSession.count({
-      where: { user_id: userId },
+      where: { user_id: userId, total_questions: { gte: 8 }, status: 'completed' },
     }) > 0 : false;
 
     const personas = [

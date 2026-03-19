@@ -419,9 +419,17 @@ async function initAiChat() {
          const uid = userStore.viewer?.user.id || 'guest';
          const cachedName = localStorage.getItem(`youjian.ai.persona.${uid}.${id.value}.name`);
          title.value = cachedName || '匹配对象';
-         // All AI companion chats are direct (no sandbox)
-         wall.value.status = 'wall_broken';
-         wall.value.wallBroken = true;
+         // Psychologist & pool chat = direct; discovery fakes = sandbox
+         const isPsy = id.value === 'ai_psychologist';
+         const isPool = isPoolChat.value;
+         if (isPsy || isPool) {
+           wall.value.status = 'wall_broken';
+           wall.value.wallBroken = true;
+         } else {
+           wall.value.status = 'active_sandbox';
+           wall.value.wallBroken = false;
+           wall.value.resonanceScore = 0;
+         }
       }
     } catch (err) {
       console.error(err);
@@ -432,8 +440,10 @@ async function initAiChat() {
       const isPsychologist = actualPersonaId.value === 'ai_psychologist';
       if (isPsychologist) {
         addSystemMessage('你已进入访谈对话，可以直接聊天。', 'init');
-      } else {
+      } else if (isPoolChat.value) {
         addSystemMessage('你已连接 AI 陪聊，可以直接聊天。', 'init');
+      } else {
+        addSystemMessage('匿名会话已建立，对方还不知道你是谁。', 'init');
       }
     }
   }
@@ -529,10 +539,14 @@ async function sendMessage() {
         wall.value.resonanceScore = payload.resonance_score;
       }
 
-      // If backend explicitly says wall is broken (e.g. AI psychologist), update state
-      if (payload.wall_broken) {
-        wall.value.wallBroken = true;
-        wall.value.status = 'wall_broken';
+      // Update wall state from backend response
+      if (payload.wall_broken !== undefined) {
+        const wasNotBroken = !wall.value.wallBroken;
+        wall.value.wallBroken = payload.wall_broken;
+        wall.value.status = payload.wall_broken ? 'wall_broken' : 'active_sandbox';
+        if (payload.wall_broken && wasNotBroken) {
+          addSystemMessage('你们已突破匿名壁垒，可以直接聊天了。', 'wall-broken');
+        }
       }
 
       // Update user's pending message with paraphrased text (sandbox style)

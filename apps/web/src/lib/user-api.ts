@@ -288,6 +288,8 @@ export function askCompanion(
     reply_relay?: string;
     resonance_score?: number;
     wall_ready?: boolean;
+    wall_broken?: boolean;
+    relationship_stage?: number;
   }>('/companion/respond', {
     method: 'POST',
     token,

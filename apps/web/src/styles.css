@@ -538,6 +538,11 @@ a {
   scroll-behavior: smooth;
 }
 
+.message-list::before {
+  content: '';
+  flex: 1 1 auto;
+}
+
 .bubble {
   align-self: flex-start;
   max-width: 82%;

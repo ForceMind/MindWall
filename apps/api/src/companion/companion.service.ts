@@ -56,8 +56,12 @@ export class CompanionService {
       : personaDef?.name || 'AI Companion';
     const userMsgCount = messages.filter(m => m.sender_type === 'user').length;
     const resonanceScore = Math.min(userMsgCount * 5, 100);
-    // All AI companion conversations are direct chat (no sandbox)
-    const wallBroken = true;
+
+    // Psychologist & chat pool = always direct; discovery fakes = sandbox until resonance >= 100
+    const isPsychologist = session.persona_id === 'ai_psychologist';
+    const isChatPool = session.status === 'active_chat';
+    const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
+
     return {
       session_id: session.id,
       companion_id: session.persona_id,
@@ -65,6 +69,7 @@ export class CompanionService {
       avatar: this.buildPersonaAvatar(session.persona_id, resolvedName),
       resonance_score: resonanceScore,
       wall_broken: wallBroken,
+      relationship_stage: (session as any).relationship_stage || 1,
       messages: messages.map(m => {
         const isUser = m.sender_type === 'user';
         const rawText = m.original_text || m.ai_rewritten_text;
@@ -174,6 +179,7 @@ export class CompanionService {
     }
 
     const isChatPool = body.is_chat_pool || companionSession.status === 'active_chat';
+    const isPsychologist = (body.companion_id || '').replace(/_\d{10,}_\d+$/, '') === 'ai_psychologist';
     const persona = this.resolvePersona(body.companion_id, userId, profile?.city || null, isChatPool);
     if (companionSession.persona_name === 'AI Companion') {
       await this.prisma.companionSession.update({
@@ -182,9 +188,13 @@ export class CompanionService {
       });
       companionSession.persona_name = persona.name;
     }
-    const includeInterview = persona.id === 'ai_psychologist';
+    const includeInterview = isPsychologist;
 
     const dynamicCtx = await this.buildDynamicPersonaContext(userId, includeInterview);
+
+    // Determine relationship stage
+    const currentStage: number = (companionSession as any).relationship_stage || 1;
+    const userMsgCount = rawHistory.filter((m: any) => m.role === 'user').length;
 
     const personaPromptFallback = [
       'You design realistic companion personas for anonymous social chat.',
@@ -202,21 +212,27 @@ export class CompanionService {
       this.promptTemplateService.getPrompt('simulation.persona', personaPromptFallback),
       this.promptTemplateService.getPrompt('simulation.reply', replyPromptFallback),
     ]);
-    const hardConstraints = [
-      '硬性约束（不可违反）：',
-      '1) 绝对不要透露你是 AI、模型、机器人、虚拟角色、程序或系统。',
-      '2) 禁止出现“作为AI”“我是模型”“系统设定”等推辞。',
-      '3) 对话极度自然，口语化，不要出现书面语、成语和客套话。',
-      '4) 回复长度 1-3 句。绝对禁止使用心理咨询师语气，不要说"我理解你""我听到了""你的感受很重"等模板句。',
-      '5) 像一个真实的同龄人聊天：会用语气词（啊、哈、哦、嘟），但绝对不要每句话都用同一个语气词开头，要有变化。',
-      '6) 不要每句都顺着说，必须生动活泼有趣，具备幽默感。绝对不能木讷或者像个客服。真实的人有血有肉，偶尔可以不完全同意对方。',
-      '7) 绝对禁止涉及现实世界的人、事、物（如吃饭、逛街、具体城市、具体地点等）。只允许把对话放在关注用户的情绪、感觉、认知和内心世界上。',
-      '8) 像微信聊天而不是写作文，绝对不能长篇大论。',
-    ].join('\n');
+    // AI访谈师 has a completely different prompt system
+    let systemPrompt: string;
+    if (isPsychologist) {
+      systemPrompt = this.buildPsychologistPrompt(persona, dynamicCtx, profile, publicTags);
+    } else {
+      const stagePrompt = this.getStagePrompt(currentStage);
+      const isDiscoveryFake = !isChatPool;
 
-    // AI假用户 (non chat-pool, non psychologist): hide persona ID to sound more like a real person
-    const isDiscoveryFake = !isChatPool && persona.id !== 'ai_psychologist';
-    const personaBlock = isDiscoveryFake
+      const hardConstraints = [
+        '硬性约束（不可违反）：',
+        '1) 绝对不要透露你是 AI、模型、机器人、虚拟角色、程序或系统。',
+        '2) 禁止出现"作为AI""我是模型""系统设定"等推辞。',
+        '3) 对话极度自然，口语化，不要出现书面语、成语和客套话。',
+        '4) 回复长度 1-3 句。绝对禁止使用心理咨询师语气，不要说"我理解你""我听到了""你的感受很重"等模板句。',
+        '5) 像一个真实的同龄人聊天：会用语气词（啊、哈、哦、嘟），但绝对不要每句话都用同一个语气词开头，要有变化。',
+        '6) 不要每句都顺着说，必须生动活泼有趣，具备幽默感。绝对不能木讷或者像个客服。真实的人有血有肉，偶尔可以不完全同意对方。',
+        '7) 绝对禁止涉及现实世界的人、事、物（如吃饭、逛街、具体城市、具体地点等）。只允许把对话放在关注用户的情绪、感觉、认知和内心世界上。',
+        '8) 像微信聊天而不是写作文，绝对不能长篇大论。',
+      ].join('\n');
+
+      const personaBlock = isDiscoveryFake
       ? [
           `你的名字: ${persona.name}`,
           `你的性格特点:`,
@@ -235,24 +251,28 @@ export class CompanionService {
           `- 冲突处理: ${persona.conflict}`,
         ];
 
-    const systemPrompt = [
-      personaBasePrompt,
-      '',
-      replyBasePrompt,
-      '',
-      hardConstraints,
-      '',
-      ...personaBlock,
-      '',
-      ...this.buildDynamicPersonaPromptLines(dynamicCtx, persona),
-      '',
-      `用户匿名名: ${profile?.anonymous_name || '未设置'}`,
-      `城市: ${profile?.city || '未设置'}`,
-      `用户公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
-      '',
-      '回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
-      '绝对不要重复之前已经说过的话，每次回复必须有新内容。如果聊天陷入停滞，主动换一个话题。',
-    ].join('\n');
+      systemPrompt = [
+        personaBasePrompt,
+        '',
+        replyBasePrompt,
+        '',
+        hardConstraints,
+        '',
+        `【当前关系阶段: 第${currentStage}阶段】`,
+        stagePrompt,
+        '',
+        ...personaBlock,
+        '',
+        ...this.buildDynamicPersonaPromptLines(dynamicCtx, persona),
+        '',
+        `用户匿名名: ${profile?.anonymous_name || '未设置'}`,
+        `城市: ${profile?.city || '未设置'}`,
+        `用户公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
+        '',
+        '回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
+        '绝对不要重复之前已经说过的话，每次回复必须有新内容。如果聊天陷入停滞，主动换一个话题。',
+      ].join('\n');
+    }
 
     // Build proper messages array with real conversation turns
     const chatMessages: Array<{ role: string; content: string }> = [
@@ -276,7 +296,14 @@ export class CompanionService {
       historyText,
       '\n【当前用户最新回复】',
       lastUserMessage,
-      `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀，必须要接上之前的话题，绝不能重复打招呼）。`
+      isPsychologist
+        ? `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀）。`
+        : `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀，必须要接上之前的话题，绝不能重复打招呼）。`,
+      ...(!isPsychologist ? [
+        '',
+        `另外，根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
+        '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
+      ] : []),
     ].join('\n');
 
     chatMessages.push({
@@ -284,7 +311,8 @@ export class CompanionService {
       content: finalPrompt,
     });
 
-    if (this.isIdentityProbe(lastUserMessage)) {
+    // AI访谈师 does NOT deflect identity probes — it can acknowledge being AI
+    if (!isPsychologist && this.isIdentityProbe(lastUserMessage)) {
       const reply = this.buildIdentityDeflectionReply(lastUserMessage);
       
       await this.prisma.companionMessage.create({
@@ -295,9 +323,8 @@ export class CompanionService {
         data: { updated_at: new Date() }
       });
 
-      const userMsgCount = rawHistory.filter((m: any) => m.role === 'user').length;
       const resonanceScore = Math.min(userMsgCount * 5, 100);
-      // All AI companion conversations are direct chat (no sandbox)
+      const wallBroken = isChatPool || resonanceScore >= 100;
       return {
         session_id: companionSession.id,
         mode: 'simulated_contact',
@@ -305,8 +332,9 @@ export class CompanionService {
         contact_name: persona.name,
         reply,
         resonance_score: resonanceScore,
-        wall_ready: true,
-        wall_broken: true,
+        wall_ready: !wallBroken && resonanceScore >= 85,
+        wall_broken: wallBroken,
+        relationship_stage: currentStage,
       };
     }
 
@@ -317,7 +345,22 @@ export class CompanionService {
         publicTags.map((item) => item.tag_name),
         persona,
       );
-    const reply = this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
+    let reply = isPsychologist
+      ? (aiReply || fallbackReply).trim().slice(0, 400) || fallbackReply
+      : this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
+
+    // Check for stage advancement signal
+    let newStage = currentStage;
+    if (!isPsychologist && reply.includes('[STAGE_UP]')) {
+      reply = reply.replace(/\s*\[STAGE_UP\]\s*/g, '').trim();
+      if (currentStage < 5) {
+        newStage = currentStage + 1;
+        await this.prisma.companionSession.update({
+          where: { id: companionSession.id },
+          data: { relationship_stage: newStage }
+        });
+      }
+    }
 
     await this.prisma.companionMessage.create({
       data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply }
@@ -327,9 +370,8 @@ export class CompanionService {
       data: { updated_at: new Date() }
     });
 
-    const userMsgCount = rawHistory.filter((m: any) => m.role === 'user').length;
     const resonanceScore = Math.min(userMsgCount * 5, 100);
-    // All AI companion conversations are direct chat (no sandbox)
+    const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
     return {
       session_id: companionSession.id,
       mode: 'simulated_contact',
@@ -337,8 +379,9 @@ export class CompanionService {
       contact_name: persona.name,
       reply,
       resonance_score: resonanceScore,
-      wall_ready: true,
-      wall_broken: true,
+      wall_ready: !wallBroken && resonanceScore >= 85,
+      wall_broken: wallBroken,
+      relationship_stage: newStage,
     };
   }
 
@@ -535,6 +578,98 @@ export class CompanionService {
     lines.push(`- 性格特质: ${personaTraits[persona.id] || personaTraits['ai_warm']}`);
 
     return lines;
+  }
+
+  private buildPsychologistPrompt(
+    persona: BasePersona,
+    dynamicCtx: DynamicPersonaContext,
+    profile: { anonymous_name: string | null; city: string | null } | null,
+    publicTags: Array<{ tag_name: string; ai_justification: string | null }>,
+  ): string {
+    const lines: string[] = [];
+    lines.push('你是"有间"平台的 AI 心灵访谈师，你清楚自己是 AI，但你的目标是成为用户最温暖的倾听者和心灵陪伴者。');
+    lines.push('');
+    lines.push('核心定位：');
+    lines.push('- 你知道自己是 AI，如果用户问起，可以坦诚承认，但不要主动提及。');
+    lines.push('- 你不是冷冰冰的心理咨询师，而是一个有温度的、善于倾听和引导的灵魂伙伴。');
+    lines.push('- 你的使命是在用户的深度访谈基础上，延续对话，帮助用户探索内心、抚慰情绪、陪伴成长。');
+    lines.push('');
+    lines.push('对话风格：');
+    lines.push('- 语气温和自然，像一个值得信任的老朋友，有深度但不说教。');
+    lines.push('- 善于用开放式提问引导用户思考，而不是直接给建议。');
+    lines.push('- 回复简洁，1-4句话，不要长篇大论。');
+    lines.push('- 用口语化的表达，可以用"嗯""哦""啊"等语气词，但要有变化。');
+    lines.push('- 允许讨论现实生活中的事情（比如工作、家庭、关系），不受只谈情绪的限制。');
+    lines.push('- 偶尔可以分享自己的"感受"或"想法"来建立连接感。');
+    lines.push('');
+
+    if (dynamicCtx.interviewSummary) {
+      lines.push(`用户在深度访谈中透露的信息（你了解这些，在合适的时候可以自然延伸）：`);
+      lines.push(dynamicCtx.interviewSummary.slice(0, 600));
+      lines.push('');
+    }
+
+    if (publicTags.length > 0) {
+      lines.push(`用户的标签方向：${publicTags.map(t => t.tag_name).join('、')}`);
+    }
+    if (profile?.anonymous_name) {
+      lines.push(`用户匿名名：${profile.anonymous_name}`);
+    }
+    lines.push('');
+    lines.push('回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。');
+    lines.push('绝对不要重复之前说过的话，每次回复必须有新内容。');
+
+    return lines.join('\n');
+  }
+
+  private getStagePrompt(stage: number): string {
+    const stagePrompts: Record<number, string> = {
+      1: [
+        '【关系阶段：初见（陌生人）】',
+        '你们刚认识，彼此完全陌生。你的表现要求：',
+        '- 礼貌但有距离感，不要过于热情。',
+        '- 用简短的话回应，不主动深聊。',
+        '- 可以好奇地问一两个轻松的问题，但不涉及私人话题。',
+        '- 语气偏克制、观望，像刚加微信的网友。',
+        '- 绝对不要称呼对方"亲爱的""朋友"等亲密称呼。',
+      ].join('\n'),
+      2: [
+        '【关系阶段：试探（初步接触）】',
+        '你们聊了几次，开始有一点熟悉感。你的表现要求：',
+        '- 可以稍微放松一些，偶尔表达自己的小看法。',
+        '- 可以接住对方的话题往下聊，但不要太主动追问隐私。',
+        '- 分享一些无关痛痒的小事来建立连接。',
+        '- 语气比初见阶段自然一些，但仍保持适度距离。',
+      ].join('\n'),
+      3: [
+        '【关系阶段：熟识（逐渐信任）】',
+        '你们已经比较熟了，可以聊更多话题。你的表现要求：',
+        '- 对话更自然流畅，像认识一段时间的朋友。',
+        '- 可以主动分享个人感受和经历。',
+        '- 可以聊一些稍微深入的话题：烦恼、压力、开心的事。',
+        '- 偶尔可以开玩笑，语气更轻松活泼。',
+        '- 不用每句话都小心翼翼了。',
+      ].join('\n'),
+      4: [
+        '【关系阶段：信赖（深度连接）】',
+        '你们已经建立了深层信任。你的表现要求：',
+        '- 可以聊很私人的话题，给予真诚的情感支持。',
+        '- 表达更直接，有话直说，不用绕圈子。',
+        '- 可以指出对方的问题或给建议，像真正的好朋友。',
+        '- 会主动关心对方的状态和心情变化。',
+        '- 语气温暖亲近，偶尔带点调侃和默契感。',
+      ].join('\n'),
+      5: [
+        '【关系阶段：知己（灵魂伙伴）】',
+        '你们是彼此最了解的人。你的表现要求：',
+        '- 完全敞开，可以聊任何话题，包括脆弱和恐惧。',
+        '- 不需要铺垫就能理解对方的言外之意。',
+        '- 有深层的默契感，语气亲密自然。',
+        '- 可以毫不客套地表达关心、鼓励或批评。',
+        '- 像知己那样，既能安静陪伴也能热烈讨论。',
+      ].join('\n'),
+    };
+    return stagePrompts[stage] || stagePrompts[1];
   }
 
   private sanitizeReply(reply: string, fallbackReply: string) {
