@@ -186,10 +186,10 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
 
 function buildCompanionHistory() {
   return messages.value
-    .filter((item) => item.kind === 'text')
+    .filter((item) => item.kind === 'text' || item.kind === 'ai-relay')
     .map((item) => ({
       role: item.mine ? 'user' : 'assistant',
-      text: item.text,
+      text: item.originalText || item.text,
     }))
     .slice(-18);
 }
@@ -375,15 +375,37 @@ async function initAiChat() {
       if (id.value && !id.value.startsWith('ai_')) {
          aiSessionId.value = id.value;
          const res = await fetchCompanionMessages(userStore.token!, id.value);
-         title.value = res.name || 'AI Companion';
+         title.value = res.name || '匹配对象';
          actualPersonaId.value = res.companion_id;
-         messages.value = res.messages.map((m: any) => ({
-           id: m.id,
-           text: m.text,
-           mine: m.role === 'user',
-           kind: (m.role === "user" || wall.value?.wallBroken) ? "text" : "ai-relay",
-           time: m.created_at,
-         }));
+
+         // Use backend resonance and wall state
+         const backendResonance = res.resonance_score ?? 0;
+         const backendWallBroken = res.wall_broken ?? false;
+         wall.value.resonanceScore = backendResonance;
+         wall.value.wallBroken = backendWallBroken;
+         wall.value.status = backendWallBroken ? 'wall_broken' : 'active_sandbox';
+         wall.value.wallReady = backendResonance >= 100 && !backendWallBroken;
+
+         messages.value = res.messages.map((m: any) => {
+           const isUser = m.role === 'user';
+           if (isUser) {
+             return {
+               id: m.id,
+               text: (!backendWallBroken && m.sender_summary) ? m.sender_summary : m.text,
+               originalText: (!backendWallBroken && m.sender_summary) ? (m.original_text || m.text) : undefined,
+               mine: true,
+               kind: (!backendWallBroken && m.sender_summary) ? 'ai-relay' as const : 'text' as const,
+               time: m.created_at,
+             };
+           }
+           return {
+             id: m.id,
+             text: (!backendWallBroken && m.relay_text) ? m.relay_text : m.text,
+             mine: false,
+             kind: backendWallBroken ? 'text' as const : 'ai-relay' as const,
+             time: m.created_at,
+           };
+         });
          for (const item of messages.value) {
            messageIdSet.add(item.id);
          }
@@ -391,29 +413,16 @@ async function initAiChat() {
          // Persona ID (e.g., ai_psychologist) - new session, no history yet
          actualPersonaId.value = id.value;
          aiSessionId.value = '';
-         title.value = '匹配对象';
+         // Try to get cached name from discovery
+         const uid = userStore.viewer?.user.id || 'guest';
+         const cachedName = localStorage.getItem(`youjian.ai.persona.${uid}.${id.value}.name`);
+         title.value = cachedName || '匹配对象';
+         wall.value.status = 'active_sandbox';
+         wall.value.wallBroken = false;
       }
     } catch (err) {
       console.error(err);
       pageError.value = '加载会话失败';
-    }
-
-    const hasWallBroken = messages.value.some(m => m.kind === 'system' && (m as any).systemType === 'wall-broken');
-    if (hasWallBroken) {
-      wall.value.wallBroken = true;
-      wall.value.status = 'wall_broken';
-    } else {
-      wall.value.wallBroken = false;
-      wall.value.status = 'active_sandbox';
-
-      const myMsgs = messages.value.filter(m => m.mine).length;
-      const hasWallReady = messages.value.some(m => m.kind === 'system' && (m as any).systemType === 'wall-ready');
-      if (myMsgs >= 3 && !hasWallReady) {
-         wall.value.wallReady = true;
-         addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
-      } else if (hasWallReady && !hasWallBroken) {
-         wall.value.wallReady = true;
-      }
     }
 
     if (messages.value.length === 0) {
@@ -476,8 +485,9 @@ async function sendMessage() {
 
   sending.value = true;
   inputText.value = '';
+  const pendingId = `u-${Date.now()}`;
   pushMessage({
-    id: `u-${Date.now()}`,
+    id: pendingId,
     text: content,
     mine: true,
     kind: 'text',
@@ -498,22 +508,42 @@ async function sendMessage() {
           window.history.replaceState({}, '', `/chat/ai/${payload.session_id}`);
         }
       }
+
+      // Update title from backend persona name
+      if (payload.contact_name) {
+        title.value = payload.contact_name;
+      }
+
+      // Update resonance from backend
+      if (payload.resonance_score !== undefined) {
+        wall.value.resonanceScore = payload.resonance_score;
+      }
+
+      // Update user's pending message with paraphrased text (sandbox style)
+      if (!wall.value.wallBroken && payload.sender_summary) {
+        const idx = messages.value.findIndex(m => m.id === pendingId);
+        if (idx !== -1) {
+          messages.value[idx].text = payload.sender_summary;
+          messages.value[idx].originalText = content;
+          messages.value[idx].kind = 'ai-relay';
+        }
+      }
+
+      // Push AI reply with paraphrased relay text in sandbox mode
+      const isSandbox = !wall.value.wallBroken;
       pushMessage({
         id: `a-${Date.now()}`,
-        text: payload.reply,
+        text: (isSandbox && payload.reply_relay) ? payload.reply_relay : payload.reply,
         mine: false,
-        kind: 'text',
+        kind: isSandbox ? 'ai-relay' : 'text',
         time: new Date().toISOString(),
       });
-    
-    // Evaluate if AI sandbox chat can be broken
-    const myMsgs = messages.value.filter(m => m.mine).length;
-    const hasWallReady = messages.value.some(m => m.kind === 'system' && m.systemType === 'wall-ready');
-    if (!wall.value.wallBroken && myMsgs >= 3 && !hasWallReady) {
-      wall.value.wallReady = true;
-      addSystemMessage('你们已达到破壁阈值，可以发起“破壁”确认。', 'wall-ready');
-    }
-        // saveAiHistory removed
+
+      // Check wall_ready from backend response
+      if (payload.wall_ready && !wall.value.wallBroken && !wall.value.wallReady) {
+        wall.value.wallReady = true;
+        addSystemMessage('你们已达到破壁阈值，可以发起"破壁"确认。', 'wall-ready');
+      }
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {

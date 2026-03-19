@@ -45,6 +45,22 @@ export interface ContactSession {
   public_tags?: PublicTag[];
 }
 
+export interface CandidateContact {
+  candidate_id: string;
+  candidate_type: 'user' | 'ai';
+  is_ai?: boolean;
+  disclosure: string;
+  city?: string | null;
+  avatar?: string | null;
+  name: string;
+  score: number;
+  has_match?: boolean;
+  match_id?: string | null;
+  match_status?: string | null;
+  resonance_score?: number | null;
+  public_tags?: PublicTag[];
+}
+
 export interface SandboxMessage {
   message_id: string;
   sender_id: string;
@@ -266,6 +282,10 @@ export function askCompanion(
     contact_name: string;
     reply: string;
     session_id?: string;
+    sender_summary?: string;
+    reply_relay?: string;
+    resonance_score?: number;
+    wall_ready?: boolean;
   }>('/companion/respond', {
     method: 'POST',
     token,

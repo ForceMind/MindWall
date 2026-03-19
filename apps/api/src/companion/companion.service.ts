@@ -50,17 +50,32 @@ export class CompanionService {
       orderBy: { created_at: 'asc' },
     });
     const personaDef = PRESET_PERSONAS.find(p => p.id === session.persona_id);
+    const resolvedName = session.persona_name && session.persona_name !== 'AI Companion'
+      ? session.persona_name
+      : personaDef?.name || 'AI Companion';
+    const userMsgCount = messages.filter(m => m.sender_type === 'user').length;
+    const resonanceScore = Math.min(userMsgCount * 5, 100);
+    const wallBroken = resonanceScore >= 100 && userMsgCount >= 20;
     return {
       session_id: session.id,
       companion_id: session.persona_id,
-      name: session.persona_name || personaDef?.name || 'AI Companion',
-      avatar: '/assets/avatars/bot-1.png',
-      messages: messages.map(m => ({
-        id: m.id,
-        role: m.sender_type,
-        text: m.ai_rewritten_text,
-        created_at: m.created_at,
-      }))
+      name: resolvedName,
+      avatar: this.buildPersonaAvatar(session.persona_id, resolvedName),
+      resonance_score: resonanceScore,
+      wall_broken: wallBroken,
+      messages: messages.map(m => {
+        const isUser = m.sender_type === 'user';
+        const rawText = m.original_text || m.ai_rewritten_text;
+        return {
+          id: m.id,
+          role: m.sender_type,
+          text: m.ai_rewritten_text,
+          original_text: isUser ? m.original_text : undefined,
+          relay_text: wallBroken ? undefined : this.summarizeForRelay(rawText, resonanceScore),
+          sender_summary: (isUser && !wallBroken) ? this.summarizeForSender(rawText, resonanceScore) : undefined,
+          created_at: m.created_at,
+        };
+      })
     };
   }
 
@@ -80,7 +95,7 @@ export class CompanionService {
       body.companion_id = companionSession.persona_id;
     } else {
       companionSession = await this.prisma.companionSession.findFirst({
-        where: { user_id: userId, persona_id: body.companion_id, status: 'active' },
+        where: { user_id: userId, persona_id: body.companion_id, status: { in: ['active', 'active_sandbox'] } },
         orderBy: { updated_at: 'desc' }
       });
       if (!companionSession) {
@@ -89,6 +104,7 @@ export class CompanionService {
             user_id: userId,
             persona_id: body.companion_id!,
             persona_name: 'AI Companion',
+            status: 'active_sandbox',
           }
         });
       }
@@ -259,12 +275,18 @@ export class CompanionService {
         data: { updated_at: new Date() }
       });
 
+      const userMsgCount = rawHistory.filter((m: any) => m.role === 'user').length;
+      const resonanceScore = Math.min(userMsgCount * 5, 100);
       return {
         session_id: companionSession.id,
         mode: 'simulated_contact',
         contact_id: persona.id,
         contact_name: persona.name,
         reply,
+        sender_summary: this.summarizeForSender(lastUserMessage, resonanceScore),
+        reply_relay: this.summarizeForRelay(reply, resonanceScore),
+        resonance_score: resonanceScore,
+        wall_ready: resonanceScore >= 100,
       };
     }
 
@@ -285,12 +307,18 @@ export class CompanionService {
       data: { updated_at: new Date() }
     });
 
+    const userMsgCount = rawHistory.filter((m: any) => m.role === 'user').length;
+    const resonanceScore = Math.min(userMsgCount * 5, 100);
     return {
       session_id: companionSession.id,
       mode: 'simulated_contact',
       contact_id: persona.id,
       contact_name: persona.name,
       reply,
+      sender_summary: this.summarizeForSender(lastUserMessage, resonanceScore),
+      reply_relay: this.summarizeForRelay(reply, resonanceScore),
+      resonance_score: resonanceScore,
+      wall_ready: resonanceScore >= 100,
     };
   }
 
@@ -307,7 +335,7 @@ export class CompanionService {
 
   private resolvePersona(companionId: string | undefined, userId: string, city: string | null): BasePersona {
     const rawId = (companionId || '').trim().toLowerCase();
-    const normalized = rawId.replace(/_\d+_\d+$/, ''); // Strip dynamic timestamp suffix
+    const normalized = rawId.replace(/_\d{10,}_\d+$/, ''); // Strip old dynamic timestamp_random suffix only
 
     let archetype: BasePersona;
     if (normalized) {
@@ -574,5 +602,90 @@ export class CompanionService {
       });
       return null;
     }
+  }
+
+  private summarizeForRelay(text: string, resonanceScore: number = 0): string {
+    const warm = resonanceScore >= 70;
+    const nearWall = resonanceScore >= 85;
+    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
+      return warm ? '对方热情地和你打了招呼' : '对方向你打招呼';
+    }
+    if (/^(谢|感谢|多谢)/.test(text)) {
+      return warm ? '对方真诚地向你表达了谢意' : '对方表达了感谢';
+    }
+    if (/^(再见|拜拜|bye)/i.test(text)) return '对方向你道别';
+    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+      return warm ? '对方和你分享了最近的累和压力，听起来似乎需要人聊聊' : '对方分享了最近的疲惫感受';
+    }
+    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+      return warm ? '对方很兴奋地分享了一个开心的事' : '对方分享了一些积极的心情';
+    }
+    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+      return warm ? '对方向你吐露了一些低落的情绪，可能是在向你寻求共鸣' : '对方表达了低落的情绪';
+    }
+    if (/(\?|？|吗|呢|吧$)/.test(text)) {
+      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
+    }
+    if (text.length <= 6) return '对方发来了一条简短消息';
+    if (nearWall) return `对方认真地和你分享了一段想法（约${text.length}字），看起来你们聊得很投入`;
+    if (warm) return `对方和你分享了一段详细的想法（约${text.length}字）`;
+    return `对方分享了一段想法（约${text.length}字）`;
+  }
+
+  private summarizeForSender(text: string, resonanceScore: number = 0): string {
+    const warm = resonanceScore >= 70;
+    const nearWall = resonanceScore >= 85;
+    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
+      return warm ? '你热情地向对方打了招呼' : '你向对方问好';
+    }
+    if (/^(谢|感谢|多谢)/.test(text)) {
+      return warm ? '你真诚地向对方表达了谢意' : '你表达了感谢';
+    }
+    if (/^(再见|拜拜|bye)/i.test(text)) return '你向对方道别';
+    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+      return warm ? '你和对方分享了最近的累和压力' : '你分享了最近的疲惫感受';
+    }
+    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+      return warm ? '你兴奋地分享了一个开心的事' : '你分享了一些积极的心情';
+    }
+    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+      return warm ? '你向对方吐露了一些低落的情绪' : '你表达了低落的情绪';
+    }
+    if (/(\?|？|吗|呢|吧$)/.test(text)) {
+      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
+    }
+    if (text.length <= 6) return '你发了一条简短消息';
+    if (nearWall) return `你认真地分享了一段想法（约${text.length}字）`;
+    if (warm) return `你和对方分享了一段详细的想法（约${text.length}字）`;
+    return `你分享了一段想法（约${text.length}字）`;
+  }
+
+  private buildPersonaAvatar(seed: string, label: string): string {
+    let hash = 2166136261;
+    for (let i = 0; i < seed.length; i += 1) {
+      hash ^= seed.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    const palette = [
+      ['#111827', '#1d4ed8', '#bfdbfe'],
+      ['#172554', '#0f766e', '#99f6e4'],
+      ['#312e81', '#be123c', '#fecdd3'],
+    ][Math.abs(hash) % 3];
+    const symbol = (label || '?').slice(0, 1).toUpperCase();
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${palette[0]}"/>
+            <stop offset="100%" stop-color="${palette[1]}"/>
+          </linearGradient>
+        </defs>
+        <rect width="160" height="160" rx="40" fill="url(#bg)"/>
+        <circle cx="40" cy="38" r="24" fill="${palette[2]}" opacity="0.85"/>
+        <circle cx="120" cy="120" r="26" fill="#ffffff" opacity="0.18"/>
+        <text x="80" y="94" text-anchor="middle" font-size="42" font-family="Arial, sans-serif" fill="#ffffff">${symbol}</text>
+      </svg>
+    `.replace(/\s+/g, ' ');
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
   }
 }

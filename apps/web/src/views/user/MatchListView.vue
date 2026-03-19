@@ -53,45 +53,6 @@ function cachePersonaNames(candidateList: CandidateContact[]) {
   }
 }
 
-function getAiSessionsFromLocal(): ContactSession[] {
-  const uid = userStore.viewer?.user.id || 'guest';
-  const prefix = `youjian.ai.chat.${uid}.`;
-  const sessions: ContactSession[] = [];
-  
-  for (let i = 0; i < localStorage.length; i++) {
-    const storageKey = localStorage.key(i);
-    if (!storageKey || !storageKey.startsWith(prefix)) continue;
-    
-    const key = storageKey.slice(prefix.length);
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) continue;
-    try {
-      const msgs = JSON.parse(raw);
-      if (!Array.isArray(msgs) || msgs.length === 0) continue;
-      const last = msgs[msgs.length - 1];
-      const hasWallBroken = msgs.some((m: any) => m.kind === 'system' && m.systemType === 'wall-broken');
-      sessions.push({
-        match_id: key,
-        counterpart_user_id: key,
-        candidate_type: 'ai',
-        disclosure: '匹配对象',
-        name: getCachedPersonaName(key),
-        avatar: null,
-        city: null,
-        status: hasWallBroken ? 'wall_broken' : 'active_sandbox', 
-        resonance_score: 0,
-        ai_match_reason: null,
-        updated_at: last.time || new Date().toISOString(),
-        public_tags: [],
-      });
-    } catch {
-      // skip corrupt data
-    }
-  }
-  return sessions;
-}
-
-
   async function loadSessions() {
     if (!userStore.token) return;
     contactsLoading.value = true;
@@ -112,6 +73,10 @@ function getAiSessionsFromLocal(): ContactSession[] {
     loadSessions();
   });
 
+// Module-level cache to persist across component remounts (e.g. back navigation)
+let cachedCandidateList: CandidateContact[] | null = null;
+let cachedCityScopeValue: string | null = null;
+
   async function loadData(isRefresh = false) {
   if (!userStore.token) {
     router.replace('/login');
@@ -126,11 +91,19 @@ function getAiSessionsFromLocal(): ContactSession[] {
   }
 
   try {
-    const candidatePayload = await fetchCandidates(userStore.token);
+    // Use cached candidates on back navigation; only re-fetch on explicit refresh
+    if (!isRefresh && cachedCandidateList) {
+      candidates.value = cachedCandidateList;
+      cityScope.value = cachedCityScopeValue;
+    } else {
+      const candidatePayload = await fetchCandidates(userStore.token);
       candidates.value = candidatePayload.candidates;
       cityScope.value = candidatePayload.city_scope;
+      cachedCandidateList = candidatePayload.candidates;
+      cachedCityScopeValue = candidatePayload.city_scope;
       cachePersonaNames(candidatePayload.candidates);
-      await loadSessions();
+    }
+    await loadSessions();
 
     if (contacts.value.length === 0 && candidates.value.length > 0) {
       activePane.value = 'discover';

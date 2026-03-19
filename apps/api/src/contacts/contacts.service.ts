@@ -34,7 +34,7 @@ export class ContactsService {
     if (!city) {
       return {
         city_scope: null,
-        candidates: this.buildAiCandidates(me.tags, null, userId),
+        candidates: await this.buildAiCandidates(me.tags, null, userId),
       };
     }
 
@@ -152,7 +152,7 @@ export class ContactsService {
 
     return {
       city_scope: city,
-      candidates: [...candidates, ...this.buildAiCandidates(me.tags, city, userId)],
+      candidates: [...candidates, ...await this.buildAiCandidates(me.tags, city, userId)],
     };
   }
 
@@ -276,15 +276,21 @@ export class ContactsService {
       }),
       ...aiSessions.map(session => {
         const personaDef = PRESET_PERSONAS.find(p => p.id === session.persona_id);
+        const displayName = session.persona_name && session.persona_name !== 'AI Companion'
+          ? session.persona_name
+          : personaDef?.name || 'AI Companion';
         return {
           match_id: session.id, // Using match_id for the front-end to know it's a chat
           candidate_type: 'ai',
           is_ai: true,
-          disclosure: 'AI Agent',
-          name: session.persona_name || personaDef?.name || 'AI Companion',
-          avatar: '/assets/avatars/bot-1.png',
+          disclosure: '匹配对象',
+          name: displayName,
+          avatar: this.buildPersonaAvatar(session.persona_id, displayName),
           status: session.status,
+          resonance_score: 0,
+          ai_match_reason: null,
           updated_at: session.updated_at,
+          public_tags: [],
         };
       })
     ].sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime());
@@ -381,7 +387,7 @@ export class ContactsService {
     return Math.max(0, Math.min(100, Math.round(overlap * 100 - riskPenalty)));
   }
 
-  private buildAiCandidates(
+  private async buildAiCandidates(
     selfTags: Array<{ tag_name: string; weight: number }>,
     city?: string | null,
     userId?: string,
@@ -391,21 +397,48 @@ export class ContactsService {
       .slice(0, 2)
       .map((item) => item.tag_name);
 
-    // Pick 6 random personas out of the preset
-    const shuffled = [...PRESET_PERSONAS].sort(() => 0.5 - Math.random());
-    const aiCount = Math.floor(Math.random() * 3) + 1;
+    // Pick AI personas with a deterministic seed so the same user gets stable candidates
+    const userSeed = this.hashSeed(userId || 'default');
+    const nonPsych = PRESET_PERSONAS.filter(p => p.id !== 'ai_psychologist');
+    const shuffled = [...nonPsych].sort((a, b) => {
+      const ha = this.hashSeed(a.id + userId);
+      const hb = this.hashSeed(b.id + userId);
+      return ha - hb;
+    });
+    const aiCount = (userSeed % 3) + 1;
     const aiCandidates = shuffled.slice(0, aiCount);
 
-    const personas = aiCandidates.map(p => {
-      const isPsych = p.id === 'ai_psychologist';
-      return {
-        id: isPsych ? p.id : `${p.id}_${Date.now()}_${Math.floor(Math.random()*1000)}`, // dynamic ID so they change!
-        name: isPsych ? p.name : this.generateDynamicName(userId || '', p.id, city || null),
+    // Always include the psychologist (AI counselor)
+    const psychologist = PRESET_PERSONAS.find(p => p.id === 'ai_psychologist');
+
+    const personas = [
+      ...(psychologist ? [{
+        id: psychologist.id,
+        name: psychologist.name,
+        tags: [...psychologist.tags, ...seedTags].slice(0, 4),
+        summary: psychologist.summary,
+        disclosure: 'AI 访谈师',
+      }] : []),
+      ...aiCandidates.map(p => ({
+        id: p.id,
+        name: this.generateDynamicName(userId || '', p.id, city || null),
         tags: [...p.tags, ...seedTags].slice(0, 4),
         summary: p.summary,
         disclosure: '匹配对象',
-      };
-    });
+      })),
+    ];
+
+    // Look up existing companion sessions for these AI personas
+    const existingSessions = userId ? await this.prisma.companionSession.findMany({
+      where: {
+        user_id: userId,
+        persona_id: { in: personas.map(p => p.id) },
+        status: { in: ['active', 'active_sandbox'] },
+      },
+      orderBy: { updated_at: 'desc' },
+      select: { id: true, persona_id: true },
+    }) : [];
+    const sessionByPersona = new Map(existingSessions.map(s => [s.persona_id, s.id]));
 
     return personas.map((item, index) => ({
       candidate_id: item.id,
@@ -416,8 +449,8 @@ export class ContactsService {
       avatar: this.buildPersonaAvatar(item.id, item.name),
       name: item.name,
       score: index === 0 ? 90 : Math.max(55, 74 - (index - 1) * 5),
-      has_match: false,
-      match_id: null,
+      has_match: sessionByPersona.has(item.id),
+      match_id: sessionByPersona.get(item.id) || null,
       match_status: null,
       resonance_score: null,
       public_tags: item.tags.slice(0, 6).map((tagName) => ({
