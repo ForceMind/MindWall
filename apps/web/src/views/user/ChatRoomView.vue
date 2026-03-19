@@ -516,11 +516,6 @@ async function sendMessage() {
     const history = buildCompanionHistory();
     
       const payload = await askCompanion(userStore.token, actualPersonaId.value, history, aiSessionId.value, isPoolChat.value || undefined);
-      // Show "typing..." indicator for human-like realism
-      peerTyping.value = true;
-      const delay = Math.min(1500 + (payload.reply.length * 50), 6000);
-      await new Promise(r => setTimeout(r, delay));
-      peerTyping.value = false;
       if (payload.session_id) {
         aiSessionId.value = payload.session_id;
         // Silently update URL so future navigation loads the correct session
@@ -549,7 +544,7 @@ async function sendMessage() {
         }
       }
 
-      // Update user's pending message with paraphrased text (sandbox style)
+      // Immediately update user's pending message with relay text (before typing delay)
       if (!wall.value.wallBroken && payload.sender_summary) {
         const idx = messages.value.findIndex(m => m.id === pendingId);
         if (idx !== -1) {
@@ -558,6 +553,12 @@ async function sendMessage() {
           messages.value[idx].kind = 'ai-relay';
         }
       }
+
+      // Show "typing..." indicator AFTER sender relay is visible
+      peerTyping.value = true;
+      const delay = Math.min(1500 + (payload.reply.length * 50), 6000);
+      await new Promise(r => setTimeout(r, delay));
+      peerTyping.value = false;
 
       // Push AI reply with paraphrased relay text in sandbox mode
       const isSandbox = !wall.value.wallBroken;
