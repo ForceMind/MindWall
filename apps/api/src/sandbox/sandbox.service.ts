@@ -729,6 +729,21 @@ export class SandboxService {
     if (/^(再见|拜拜|bye)/i.test(text)) {
       return '对方向你道别';
     }
+    // Detect questions BEFORE topic/emotion patterns to avoid misclassifying
+    // e.g. "你因为什么疲惫呢" is a question, not sharing fatigue
+    const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
+    if (isQuestion) {
+      if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+        return warm ? '对方关心地询问了你最近的状态' : '对方询问了关于疲惫的话题';
+      }
+      if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+        return warm ? '对方好奇地问了你开心的事' : '对方询问了一些积极的话题';
+      }
+      if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+        return warm ? '对方关心地询问了你的心情' : '对方询问了关于心情的话题';
+      }
+      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
+    }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
       return warm
         ? '对方和你分享了最近的累和压力，听起来似乎需要人聊聊'
@@ -741,9 +756,6 @@ export class SandboxService {
       return warm
         ? '对方向你吐露了一些低落的情绪，可能是在向你寻求共鸣'
         : '对方表达了低落的情绪';
-    }
-    if (/(\?|？|吗|呢|吧$)/.test(text)) {
-      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
     }
     if (text.length <= 6) {
       return '对方发来了一条简短消息';
@@ -771,6 +783,20 @@ export class SandboxService {
     if (/^(再见|拜拜|bye)/i.test(text)) {
       return '你向对方道别';
     }
+    // Detect questions BEFORE topic/emotion patterns
+    const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
+    if (isQuestion) {
+      if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+        return warm ? '你关心地询问了对方最近的状态' : '你询问了对方关于疲惫的话题';
+      }
+      if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+        return warm ? '你好奇地问了对方开心的事' : '你询问了对方一些积极的话题';
+      }
+      if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+        return warm ? '你关心地询问了对方的心情' : '你询问了对方关于心情的话题';
+      }
+      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
+    }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
       return warm
         ? '你和对方分享了最近的累和压力'
@@ -783,9 +809,6 @@ export class SandboxService {
       return warm
         ? '你向对方吐露了一些低落的情绪'
         : '你表达了低落的情绪';
-    }
-    if (/(\?|？|吗|呢|吧$)/.test(text)) {
-      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
     }
     if (text.length <= 6) {
       return '你发了一条简短消息';
