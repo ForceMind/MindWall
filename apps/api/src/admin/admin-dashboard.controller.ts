@@ -106,7 +106,11 @@ export class AdminDashboardController {
   }
 
   @Get('logs')
-  async logs(@Query('lines') lines?: string) {
-    return this.adminDashboardService.getServerLogs(Number(lines || 200));
+  async logs(
+    @Query('lines') lines?: string,
+    @Query('category') category?: string,
+    @Query('level') level?: string,
+  ) {
+    return this.adminDashboardService.getServerLogs(Number(lines || 200), category, level);
   }
 }

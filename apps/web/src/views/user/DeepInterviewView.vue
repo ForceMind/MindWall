@@ -256,9 +256,6 @@ onBeforeUnmount(() => {
             @keydown.enter.exact.prevent="submitAnswer"
           />
           <div class="row" style="gap: 8px">
-            <button class="btn btn-ghost" type="button" :disabled="loading || sending || skipping" @click="skipInterview" style="font-size: 13px; white-space: nowrap">
-              提前结束
-            </button>
             <button class="btn btn-ghost" type="button" :disabled="loading || sending || skippingQuestion" @click="skipCurrentQuestion" style="font-size: 13px; white-space: nowrap">
               跳过此题
             </button>

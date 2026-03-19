@@ -279,11 +279,12 @@ export class ContactsService {
         const displayName = session.persona_name && session.persona_name !== 'AI Companion'
           ? session.persona_name
           : personaDef?.name || 'AI Companion';
+        const isPsychologist = session.persona_id === 'ai_psychologist';
         return {
           match_id: session.id, // Using match_id for the front-end to know it's a chat
           candidate_type: 'ai',
           is_ai: true,
-          disclosure: '匹配对象',
+          disclosure: isPsychologist ? 'AI 访谈师' : 'AI 陪聊',
           name: displayName,
           avatar: this.buildPersonaAvatar(session.persona_id, displayName),
           status: session.status,
@@ -424,7 +425,7 @@ export class ContactsService {
         name: this.generateDynamicName(userId || '', p.id, city || null),
         tags: [...p.tags, ...seedTags].slice(0, 4),
         summary: p.summary,
-        disclosure: '匹配对象',
+        disclosure: 'AI 陪聊',
       })),
     ];
 
@@ -492,40 +493,20 @@ export class ContactsService {
 
   private generateDynamicName(userId: string, personaId: string, city: string | null): string {
     const seed = this.hashSeed(`${userId}:${personaId}`);
+    // Use the same naming rules as real users (onboarding.service buildAnonymousIdentity)
     const prefixes = [
-      '晨曦', '微澜', '星尘', '清风', '夜语', '暖阳',
-      '浮光', '远山', '深海', '云端', '松影', '晚钟',
-      '雪月', '潮汐', '烟雨', '青石', '白鸟', '秋水',
+      '雾岛', '微澜', '晚风', '晨岚', '星屿',
+      '松影', '白砂', '林深', '海盐', '青曜',
     ];
     const suffixes = [
-      '旅人', '信箱', '电台', '散步', '日常', '夜话',
-      '回声', '漫游', '远行', '观察', '听雨', '栖息',
+      '旅人', '听雨者', '漫游者', '回声者', '拾光者',
+      '观察者', '慢行客', '远行者', '摆渡人', '栖木者',
     ];
 
-    if (city) {
-      const cityPrefixes: Record<string, string[]> = {
-        '北京': ['胡同', '后海', '故宫', '鼓楼'],
-        '上海': ['外滩', '弄堂', '梧桐', '静安'],
-        '广州': ['骑楼', '珠江', '茶楼', '荔枝'],
-        '深圳': ['南山', '湾区', '梅林', '华强'],
-        '成都': ['锦里', '太古', '宽窄', '春熙'],
-        '杭州': ['西湖', '拱墅', '钱塘', '龙井'],
-        '武汉': ['江城', '东湖', '黄鹤', '热干'],
-        '南京': ['鸡鸣', '玄武', '秦淮', '紫金'],
-        '重庆': ['山城', '洪崖', '两江', '磁器'],
-        '长沙': ['橘洲', '岳麓', '湘江', '天心'],
-      };
-      const local = cityPrefixes[city];
-      if (local) {
-        const prefix = local[seed % local.length];
-        const suffix = suffixes[(seed >>> 4) % suffixes.length];
-        return `${prefix}${suffix}`;
-      }
-    }
-
     const prefix = prefixes[seed % prefixes.length];
-    const suffix = suffixes[(seed >>> 4) % suffixes.length];
-    return `${prefix}${suffix}`;
+    const suffix = suffixes[(seed >>> 3) % suffixes.length];
+    const serial = String(((seed >>> 7) % 89) + 11).padStart(2, '0');
+    return `${prefix}${suffix}${serial}`;
   }
 
   private hashSeed(text: string): number {

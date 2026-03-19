@@ -559,13 +559,36 @@ export class AdminDashboardService {
     return this.promptTemplateService.upsertPrompt(key, body);
   }
 
-  async getServerLogs(lines: number) {
+  async getServerLogs(lines: number, category?: string, level?: string) {
     const tail = await this.serverLogService.tail(lines);
+    let filtered = tail.lines;
+
+    if (category || level) {
+      filtered = tail.lines.filter((line) => {
+        try {
+          const parsed = JSON.parse(line);
+          if (level && parsed.level !== level.toUpperCase()) return false;
+          if (category) {
+            const event = String(parsed.event || '');
+            if (category === 'ai') return event.includes('openai') || event.includes('ai.');
+            if (category === 'sandbox') return event.startsWith('sandbox.');
+            if (category === 'companion') return event.startsWith('companion.');
+            if (category === 'onboarding') return event.startsWith('onboarding.');
+            if (category === 'auth') return event.startsWith('auth.');
+            return event.startsWith(category + '.');
+          }
+          return true;
+        } catch {
+          return !category && !level;
+        }
+      });
+    }
+
     return {
       file: tail.file,
       available: true,
-      total_lines: tail.count,
-      lines: tail.lines,
+      total_lines: filtered.length,
+      lines: filtered,
     };
   }
 

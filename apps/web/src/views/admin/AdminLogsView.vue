@@ -13,6 +13,23 @@ const lines = ref(200);
 const filePath = ref('');
 const totalLines = ref(0);
 const content = ref<string[]>([]);
+const category = ref('');
+const level = ref('');
+
+const categoryOptions = [
+  { value: '', label: '全部分类' },
+  { value: 'ai', label: 'AI 调用' },
+  { value: 'sandbox', label: '沙盒' },
+  { value: 'companion', label: '伴侣/陪聊' },
+  { value: 'onboarding', label: '访谈' },
+  { value: 'auth', label: '鉴权' },
+];
+const levelOptions = [
+  { value: '', label: '全部级别' },
+  { value: 'INFO', label: 'INFO' },
+  { value: 'WARN', label: 'WARN' },
+  { value: 'ERROR', label: 'ERROR' },
+];
 
 async function load() {
   if (!adminStore.token) {
@@ -22,7 +39,10 @@ async function load() {
   loading.value = true;
   pageError.value = '';
   try {
-    const payload = await fetchAdminLogs(adminStore.token, lines.value);
+    let url = `/admin/dashboard/logs?lines=${lines.value}`;
+    if (category.value) url += `&category=${category.value}`;
+    if (level.value) url += `&level=${level.value}`;
+    const payload = await fetchAdminLogs(adminStore.token, lines.value, category.value, level.value);
     filePath.value = payload.file;
     totalLines.value = payload.total_lines;
     content.value = payload.lines;
@@ -48,6 +68,12 @@ onMounted(() => {
         </div>
 
         <div class="row-wrap">
+          <select v-model="category" class="input" style="width: 130px" @change="load">
+            <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+          <select v-model="level" class="input" style="width: 110px" @change="load">
+            <option v-for="opt in levelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
           <input v-model.number="lines" class="input" type="number" min="20" max="3000" style="width: 130px" />
           <button class="btn btn-ghost" type="button" :disabled="loading" @click="load">刷新</button>
         </div>

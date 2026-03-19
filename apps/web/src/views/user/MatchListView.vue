@@ -29,7 +29,10 @@ const contacts = ref<ContactSession[]>([]);
   const contactsLoading = ref(false);
 const candidates = ref<CandidateContact[]>([]);
 const linkingCandidateId = ref('');
-const activePane = ref<'sessions' | 'discover'>('sessions');
+const activePane = ref<'sessions' | 'discover' | 'ai-chat'>('sessions');
+
+const realCandidates = computed(() => candidates.value.filter(c => c.candidate_type !== 'ai' || c.disclosure === 'AI 访谈师'));
+const aiChatCandidates = computed(() => candidates.value.filter(c => c.candidate_type === 'ai' && c.disclosure !== 'AI 访谈师'));
 
 const profileName = computed(
   () =>
@@ -214,7 +217,15 @@ onMounted(() => {
             type="button"
             @click="activePane = 'discover'"
           >
-            发现匹配 {{ candidates.length }}
+            发现匹配 {{ realCandidates.length }}
+          </button>
+          <button
+            class="segment-btn"
+            :class="activePane === 'ai-chat' ? 'is-active' : ''"
+            type="button"
+            @click="activePane = 'ai-chat'"
+          >
+            AI 陪聊 {{ aiChatCandidates.length }}
           </button>
         </div>
 
@@ -270,13 +281,13 @@ onMounted(() => {
           </div>
         </div>
 
-        <div v-else class="column">
-          <div v-if="!loading && candidates.length === 0" class="empty-box">
+        <div v-else-if="activePane === 'discover'" class="column">
+          <div v-if="!loading && realCandidates.length === 0" class="empty-box">
             当前没有可展示的潜在匹配。
           </div>
 
           <div class="card-list">
-            <article v-for="candidate in candidates" :key="candidate.candidate_id" class="list-card">
+            <article v-for="candidate in realCandidates" :key="candidate.candidate_id" class="list-card">
               <div class="row" style="justify-content: space-between; align-items: flex-start">
                 <div class="row" style="min-width: 0">
                   <img v-if="candidate.avatar" :src="candidate.avatar" alt="avatar" class="avatar" />
@@ -284,6 +295,58 @@ onMounted(() => {
                     <div style="font-weight: 700">{{ candidate.name }}</div>
                     <div class="muted" style="font-size: 12px">
                       {{ candidate.city || '匿名空间' }} · {{ candidate.disclosure }}
+                    </div>
+                  </div>
+                </div>
+                <span class="badge badge-accent">匹配 {{ candidate.score }}</span>
+              </div>
+
+              <div class="row-wrap">
+                <span
+                  v-for="tag in candidate.public_tags"
+                  :key="`${candidate.candidate_id}-${tag.tag_name}`"
+                  class="tag"
+                >
+                  {{ tag.tag_name }}
+                </span>
+              </div>
+
+              <div class="row" style="justify-content: flex-end">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  :disabled="linkingCandidateId === candidate.candidate_id"
+                  @click="openCandidate(candidate)"
+                >
+                  {{
+                    candidate.match_id
+                      ? '继续聊天'
+                      : linkingCandidateId === candidate.candidate_id
+                        ? '连接中...'
+                        : '开始聊天'
+                  }}
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div v-else-if="activePane === 'ai-chat'" class="column">
+          <div v-if="!loading && aiChatCandidates.length === 0" class="empty-box">
+            暂无 AI 陪聊角色。
+          </div>
+
+          <p v-if="aiChatCandidates.length > 0" class="muted" style="font-size: 12px; margin: 0 0 8px">AI 陪聊可以直接对话，不需要经过沙盒转述。</p>
+
+          <div class="card-list">
+            <article v-for="candidate in aiChatCandidates" :key="candidate.candidate_id" class="list-card">
+              <div class="row" style="justify-content: space-between; align-items: flex-start">
+                <div class="row" style="min-width: 0">
+                  <img v-if="candidate.avatar" :src="candidate.avatar" alt="avatar" class="avatar" />
+                  <div style="min-width: 0">
+                    <div style="font-weight: 700">{{ candidate.name }}</div>
+                    <div class="muted" style="font-size: 12px">
+                      AI 陪聊
                     </div>
                   </div>
                 </div>

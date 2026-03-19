@@ -417,8 +417,9 @@ async function initAiChat() {
          const uid = userStore.viewer?.user.id || 'guest';
          const cachedName = localStorage.getItem(`youjian.ai.persona.${uid}.${id.value}.name`);
          title.value = cachedName || '匹配对象';
-         wall.value.status = 'active_sandbox';
-         wall.value.wallBroken = false;
+         // All AI companion chats are direct (no sandbox)
+         wall.value.status = 'wall_broken';
+         wall.value.wallBroken = true;
       }
     } catch (err) {
       console.error(err);
@@ -426,7 +427,12 @@ async function initAiChat() {
     }
 
     if (messages.value.length === 0) {
-      addSystemMessage('你们已建立匿名连接，为了安全初始将在沙盒中交流，内容可能由AI转述。', 'init');
+      const isPsychologist = actualPersonaId.value === 'ai_psychologist';
+      if (isPsychologist) {
+        addSystemMessage('你已进入访谈对话，可以直接聊天。', 'init');
+      } else {
+        addSystemMessage('你已连接 AI 陪聊，可以直接聊天。', 'init');
+      }
     }
   }
 
@@ -517,6 +523,12 @@ async function sendMessage() {
       // Update resonance from backend
       if (payload.resonance_score !== undefined) {
         wall.value.resonanceScore = payload.resonance_score;
+      }
+
+      // If backend explicitly says wall is broken (e.g. AI psychologist), update state
+      if (payload.wall_broken) {
+        wall.value.wallBroken = true;
+        wall.value.status = 'wall_broken';
       }
 
       // Update user's pending message with paraphrased text (sandbox style)

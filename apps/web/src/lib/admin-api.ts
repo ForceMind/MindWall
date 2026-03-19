@@ -250,13 +250,16 @@ export function testAdminConfig(
   });
 }
 
-export function fetchAdminLogs(token: string, lines = 300) {
+export function fetchAdminLogs(token: string, lines = 300, category = '', level = '') {
+  let url = `/admin/dashboard/logs?lines=${lines}`;
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  if (level) url += `&level=${encodeURIComponent(level)}`;
   return httpRequest<{
     file: string;
     available: boolean;
     total_lines: number;
     lines: string[];
-  }>(`/admin/dashboard/logs?lines=${lines}`, {
+  }>(url, {
     headers: adminHeaders(token),
   });
 }
