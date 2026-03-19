@@ -372,3 +372,64 @@ export function fetchAdminMatchMessages(token: string, matchId: string, page: nu
     headers: adminHeaders(token),
   });
 }
+
+// ---- Backup & Restore ----
+
+export function fetchAdminBackupInfo(token: string) {
+  return httpRequest<{
+    users: number;
+    profiles: number;
+    tags: number;
+    matches: number;
+    sandbox_messages: number;
+    companion_sessions: number;
+    companion_messages: number;
+    interview_records: number;
+    ai_logs: number;
+  }>('/admin/backup/info', {
+    headers: adminHeaders(token),
+  });
+}
+
+export async function downloadAdminBackup(token: string) {
+  const { apiBaseUrl } = await import('./config').then(m => ({ apiBaseUrl: m.appConfig.apiBaseUrl }));
+  const url = `${apiBaseUrl}/admin/backup/download`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const filename = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+    || `mindwall-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export async function uploadAdminRestore(token: string, file: File) {
+  const { apiBaseUrl } = await import('./config').then(m => ({ apiBaseUrl: m.appConfig.apiBaseUrl }));
+  const url = `${apiBaseUrl}/admin/backup/restore`;
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error((detail as any).message || `Restore failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ status: string; restored: Record<string, number> }>;
+}
+
+export function adminResetAllData(token: string) {
+  return httpRequest<{ status: string; message: string }>('/admin/backup/reset', {
+    method: 'DELETE',
+    headers: adminHeaders(token),
+  });
+}

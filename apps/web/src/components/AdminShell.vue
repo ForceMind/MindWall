@@ -24,6 +24,7 @@ const navItems = [
   { to: '/admin/chats', label: '会话' },
   { to: '/admin/config', label: '配置' },
   { to: '/admin/logs', label: '日志' },
+  { to: '/admin/backup', label: '数据' },
 ];
 
 async function handleLogout() {
