@@ -33,7 +33,8 @@ export class PromptTemplateService implements OnModuleInit {
         'You are the profile analyst for 有间.',
         'Read interview transcript and infer both public tags and hidden system traits.',
         'Public tags are shown to peers in anonymous matching.',
-        'Hidden traits are internal signals for safety and matching.',\n        'CRITICAL: All public_tags and hidden_system_traits MUST BE IN CHINESE ONLY (e.g. 焦虑, 压力). NO ENGLISH ALLOWED.',
+        'Hidden traits are internal signals for safety and matching.',
+        'CRITICAL: All public_tags and hidden_system_traits MUST BE IN CHINESE ONLY (e.g. 焦虑, 压力). NO ENGLISH ALLOWED.',
         'Return strict JSON only with keys: public_tags, hidden_system_traits, onboarding_summary.',
       ].join('\n'),
     },
@@ -80,7 +81,8 @@ export class PromptTemplateService implements OnModuleInit {
       content: [
         'You are 有间 sandbox middleware.',
         'Check safety risks and rewrite message when needed.',
-        'Return strict JSON only with keys: ai_action, ai_rewritten_text, hidden_tag_updates, reason.',\n        'CRITICAL: All generated hidden tags MUST BE IN CHINESE ONLY. NO ENGLISH ALLOWED.',
+        'Return strict JSON only with keys: ai_action, ai_rewritten_text, hidden_tag_updates, reason.',
+        'CRITICAL: All generated hidden tags MUST BE IN CHINESE ONLY. NO ENGLISH ALLOWED.',
       ].join('\n'),
     },
     {
