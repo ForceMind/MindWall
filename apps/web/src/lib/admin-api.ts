@@ -305,6 +305,7 @@ export interface AdminCompanionMessage {
   sender_name: string;
   original_text: string | null;
   ai_rewritten_text: string;
+  relay_text: string | null;
   ai_action: string;
   created_at: string;
 }

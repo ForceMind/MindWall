@@ -698,10 +698,12 @@ export class AdminDashboardService {
 
     const where: Record<string, unknown> = {};
 
+    // Active = messages within last 3 minutes; History = no messages for 3+ minutes
+    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
     if (tab === 'active') {
-      where.status = { in: ['active', 'active_sandbox', 'active_chat'] };
+      where.updated_at = { gte: threeMinAgo };
     } else if (tab === 'history') {
-      where.status = { notIn: ['active', 'active_sandbox', 'active_chat'] };
+      where.updated_at = { lt: threeMinAgo };
     }
 
     if (search && search.trim()) {
@@ -803,6 +805,7 @@ export class AdminDashboardService {
         sender_type: true,
         original_text: true,
         ai_rewritten_text: true,
+        relay_text: true,
         ai_action: true,
         created_at: true,
       },
@@ -816,7 +819,7 @@ export class AdminDashboardService {
       },
     });
 
-    const userName = user?.credential?.username || user?.profile?.anonymous_name || session.user_id.slice(0, 8);
+    const userName = user?.profile?.anonymous_name || user?.credential?.username || session.user_id.slice(0, 8);
 
     return {
       session: {
@@ -834,6 +837,7 @@ export class AdminDashboardService {
         sender_name: m.sender_type === 'user' ? userName : session.persona_name,
         original_text: m.original_text,
         ai_rewritten_text: m.ai_rewritten_text,
+        relay_text: m.relay_text,
         ai_action: m.ai_action,
         created_at: m.created_at,
       })),
@@ -889,7 +893,7 @@ export class AdminDashboardService {
       },
     });
     const userMap = new Map(
-      users.map((u) => [u.id, u.credential?.username || u.profile?.anonymous_name || u.id.slice(0, 8)]),
+      users.map((u) => [u.id, u.profile?.anonymous_name || u.credential?.username || u.id.slice(0, 8)]),
     );
 
     return {

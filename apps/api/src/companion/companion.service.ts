@@ -231,11 +231,9 @@ export class CompanionService {
         '4) 回复长度 1-3 句。绝对禁止使用心理咨询师语气，不要说"我理解你""我听到了""你的感受很重"等模板句。',
         '5) 像一个真实的同龄人聊天：会用语气词（啊、哈、哦、嘟），但绝对不要每句话都用同一个语气词开头，要有变化。',
         '6) 不要每句都顺着说，必须生动活泼有趣，具备幽默感。绝对不能木讷或者像个客服。真实的人有血有肉，偶尔可以不完全同意对方。',
-        '7) 【最高优先级】绝对禁止提及任何现实世界活动或物理场景，包括但不限于：见面、喝咖啡、吃饭、逛街、天气、出门、散步、旅行、具体地点、具体城市。',
-        '   你们是在线上匿名聊天，不可能见面或一起做现实活动。只聊情绪、感受、想法、兴趣话题、内心世界。',
-        '   如果用户主动提到现实活动（如"去喝咖啡""天气不错"），你必须自然地把话题转到线上/情感层面，例如：',
-        '   用户说"去哪里喝咖啡" → 你可以回"哈哈咖啡我也爱，你一般喜欢什么口味的？"（转向偏好而非地点）',
-        '   用户说"今天天气真好" → 你可以回"心情不错的样子？最近有什么开心的事吗"（转向情绪）',
+        '7) 你们是在线上匿名聊天平台，不可能真的见面。绝对禁止主动提议现实见面、一起吃饭、一起出门等线下活动。',
+        '   可以聊兴趣爱好（比如喜欢什么口味的咖啡、看什么电影），但不要约地点、约时间、说"我们去xxx"。',
+        '   如果用户主动提到线下活动（比如"去喝咖啡吧"），自然地把话题转到偏好/感受层面，例如："哈哈我也爱喝咖啡，你一般喝什么口味的？"',
         '8) 像微信聊天而不是写作文，绝对不能长篇大论。',
       ].join('\n');
 
@@ -281,7 +279,7 @@ export class CompanionService {
       ].join('\n');
     }
 
-    // Build proper messages array with real conversation turns
+    // Build proper multi-turn messages array for better context retention
     const chatMessages: Array<{ role: string; content: string }> = [
       {
         role: 'system',
@@ -289,33 +287,25 @@ export class CompanionService {
       },
     ];
 
-    let historyText = '【历史对话记录】\n';
+    // Convert history to proper multi-turn conversation format
     if (history.length > 1) {
       for (const turn of history.slice(0, -1)) {
-        const speaker = turn.role === 'assistant' ? persona.name : '用户';
-        historyText += `${speaker}: ${turn.text}\n`;
+        chatMessages.push({
+          role: turn.role === 'assistant' ? 'assistant' : 'user',
+          content: turn.text,
+        });
       }
-    } else {
-      historyText += '(无)\n';
     }
 
-    const finalPrompt = [
-      historyText,
-      '\n【当前用户最新回复】',
-      lastUserMessage,
-      isPsychologist
-        ? `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀）。`
-        : `\n请根据以上上下文，直接输出你(${persona.name})的下一句回复（纯文本，不要带有前缀，必须要接上之前的话题，绝不能重复打招呼）。`,
-      ...(!isPsychologist ? [
-        '',
-        `另外，根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
-        '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
-      ] : []),
-    ].join('\n');
+    const stageUpInstruction = !isPsychologist ? [
+      '',
+      `另外，根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
+      '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
+    ].join('\n') : '';
 
     chatMessages.push({
       role: 'user',
-      content: finalPrompt,
+      content: lastUserMessage + stageUpInstruction,
     });
 
     // AI访谈师 does NOT deflect identity probes — it can acknowledge being AI
@@ -371,9 +361,19 @@ export class CompanionService {
         publicTags.map((item) => item.tag_name),
         persona,
       );
+
+    // Log when AI fails and fallback is used, so we can diagnose
+    if (!aiReply) {
+      this.logger.warn(`Companion AI returned null for user ${userId}, using fallback. Session: ${companionSession.id}`);
+    }
+
     let reply = isPsychologist
       ? (aiReply || fallbackReply).trim().slice(0, 400) || fallbackReply
       : this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
+
+    if (!isPsychologist && aiReply && reply === fallbackReply) {
+      this.logger.warn(`Companion AI reply was sanitized away for user ${userId}. Original: "${aiReply.slice(0, 80)}"`);
+    }
 
     // Check for stage advancement signal
     let newStage = currentStage;

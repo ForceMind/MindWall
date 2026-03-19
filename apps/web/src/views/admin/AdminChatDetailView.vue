@@ -141,12 +141,13 @@ const bubbleMessages = computed<BubbleMessage[]>(() => {
     const viewAsUser = perspective.value === 'user';
     const isUserMsg = m.sender_type === 'user';
     const isMine = viewAsUser ? isUserMsg : !isUserMsg;
+    const hasRelay = !!m.relay_text;
     return {
       id: m.id,
-      text: m.ai_rewritten_text,
+      text: hasRelay ? m.relay_text! : m.ai_rewritten_text,
       originalText: m.original_text && m.original_text !== m.ai_rewritten_text ? m.original_text : undefined,
       mine: isMine,
-      kind: 'text' as const,
+      kind: hasRelay ? 'ai-relay' as const : 'text' as const,
       senderName: m.sender_name,
       time: m.created_at,
     };
