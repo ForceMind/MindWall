@@ -293,20 +293,22 @@ export class ContactsService {
           public_tags: tagMap.get(counterpartId) || [],
         };
       }),
-      ...aiSessions.map(session => {
+      ...aiSessions
+        .filter(session => session.persona_id !== 'ai_psychologist')
+        .map(session => {
         const personaDef = PRESET_PERSONAS.find(p => p.id === session.persona_id);
         const displayName = session.persona_name && session.persona_name !== 'AI Companion'
           ? session.persona_name
           : personaDef?.name || 'AI Companion';
-        const isPsychologist = session.persona_id === 'ai_psychologist';
+        // All AI companion conversations are direct chat (wall_broken)
         return {
-          match_id: session.id, // Using match_id for the front-end to know it's a chat
+          match_id: session.id,
           candidate_type: 'ai',
           is_ai: true,
-          disclosure: isPsychologist ? 'AI 访谈师' : 'AI 陪聊',
+          disclosure: 'AI 假用户',
           name: displayName,
           avatar: this.buildPersonaAvatar(session.persona_id, displayName),
-          status: session.status,
+          status: 'wall_broken',
           resonance_score: 0,
           ai_match_reason: null,
           updated_at: session.updated_at,
@@ -433,11 +435,15 @@ export class ContactsService {
     const aiCount = (this.hashSeed(`${userId}:disc:${rotationSeed}`) % 3) + 1;
     const aiCandidates = shuffled.slice(0, aiCount);
 
-    // Psychologist is always shown (clearly labeled)
     const psychologist = PRESET_PERSONAS.find(p => p.id === 'ai_psychologist');
 
+    // Psychologist only shown after user completes deep interview
+    const hasInterview = userId ? await this.prisma.onboardingInterviewSession.count({
+      where: { user_id: userId },
+    }) > 0 : false;
+
     const personas = [
-      ...(psychologist ? [{
+      ...(psychologist && hasInterview ? [{
         id: psychologist.id,
         name: psychologist.name,
         tags: [...psychologist.tags, ...seedTags].slice(0, 4),
