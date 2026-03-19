@@ -50,6 +50,7 @@ export interface SandboxMessage {
   sender_id: string;
   original_text: string;
   ai_rewritten_text: string;
+  sender_rewritten_text?: string;
   ai_action: 'passed' | 'blocked' | 'modified';
   hidden_tag_updates: Record<string, number> | null;
   created_at: string;

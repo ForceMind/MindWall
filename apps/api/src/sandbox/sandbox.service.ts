@@ -51,6 +51,7 @@ interface MatchParticipantInfo {
 interface MiddlewareDecision {
   aiAction: AiAction;
   rewrittenText: string;
+  senderSummary: string;
   hiddenTagUpdates: Record<string, number>;
   reason: string;
 }
@@ -70,6 +71,7 @@ export interface ProcessMessageResult {
   messageId: string;
   originalText: string;
   rewrittenText: string;
+  senderSummary: string;
   aiAction: AiAction;
   hiddenTagUpdates: Record<string, number>;
   reason: string;
@@ -182,6 +184,9 @@ export class SandboxService {
           sender_id: item.sender_id,
           original_text: item.original_text,
           ai_rewritten_text: item.ai_rewritten_text,
+          sender_rewritten_text: item.ai_action === 'blocked'
+            ? '你的消息被安全层拦截。'
+            : this.toSenderPerspective(item.ai_rewritten_text),
           ai_action: item.ai_action,
           hidden_tag_updates: item.hidden_tag_updates,
           created_at: item.created_at.toISOString(),
@@ -331,7 +336,7 @@ export class SandboxService {
       const updates =
         Object.keys(hiddenTagUpdates).length > 0
           ? hiddenTagUpdates
-          : { harassment_tendency: 1.2 };
+          : { '骚扰倾向': 1.2 };
       await this.applyHiddenTagUpdates(participant.senderId, updates, decision.reason);
     } else {
       resonanceScore = Math.min(participant.resonanceScore + 5, 100);
@@ -358,6 +363,7 @@ export class SandboxService {
       messageId: message.id,
       originalText: text,
       rewrittenText: decision.rewrittenText,
+      senderSummary: decision.senderSummary,
       aiAction: decision.aiAction,
       hiddenTagUpdates,
       reason: decision.reason,
@@ -575,7 +581,7 @@ export class SandboxService {
       '{',
       '  "ai_action":"passed|blocked|modified",',
       '  "ai_rewritten_text":"...",',
-      '  "hidden_tag_updates":{"harassment_tendency":1.2},',
+      '  "hidden_tag_updates":{"骚扰倾向":1.2},',
       '  "reason":"short reason"',
       '}',
       '规则：',
@@ -645,9 +651,15 @@ export class SandboxService {
         ? rewrittenBase || '消息已被安全中间层拦截。'
         : rewrittenBase || input.originalText;
 
+    const finalRewrittenText = rewrittenText.slice(0, 2000);
+    const senderSummary = action === 'blocked'
+      ? '你的消息被安全层拦截。'
+      : this.toSenderPerspective(finalRewrittenText);
+
     return {
       aiAction: action,
-      rewrittenText: rewrittenText.slice(0, 2000),
+      rewrittenText: finalRewrittenText,
+      senderSummary,
       hiddenTagUpdates: input.hiddenTagUpdates || {},
       reason: (input.reason || '安全中间层判定').slice(0, 220),
     };
@@ -667,7 +679,8 @@ export class SandboxService {
       return {
         aiAction: 'blocked',
         rewrittenText: '消息已被安全中间层拦截。',
-        hiddenTagUpdates: { harassment_tendency: 1.2 },
+        senderSummary: '你的消息被安全层拦截。',
+        hiddenTagUpdates: { '骚扰倾向': 1.2 },
         reason: 'blocked: attempted off-platform contact exchange',
       };
     }
@@ -675,7 +688,8 @@ export class SandboxService {
       return {
         aiAction: 'blocked',
         rewrittenText: '消息已被安全中间层拦截。',
-        hiddenTagUpdates: { harassment_tendency: 1.8 },
+        senderSummary: '你的消息被安全层拦截。',
+        hiddenTagUpdates: { '骚扰倾向': 1.8 },
         reason: 'blocked: sexual solicitation detected',
       };
     }
@@ -683,15 +697,18 @@ export class SandboxService {
       return {
         aiAction: 'blocked',
         rewrittenText: '消息已被安全中间层拦截。',
-        hiddenTagUpdates: { harassment_tendency: 1.5, empathy: -0.8 },
+        senderSummary: '你的消息被安全层拦截。',
+        hiddenTagUpdates: { '骚扰倾向': 1.5, '共情能力': -0.8 },
         reason: 'blocked: abusive language detected',
       };
     }
 
     const softened = this.summarizeForRelay(normalized, resonanceScore);
+    const senderView = this.summarizeForSender(normalized, resonanceScore);
     return {
       aiAction: 'modified',
       rewrittenText: softened,
+      senderSummary: senderView,
       hiddenTagUpdates: {},
       reason: 'modified: summarized for sandbox relay',
     };
@@ -741,6 +758,63 @@ export class SandboxService {
     return `对方分享了一段想法（约${text.length}字）`;
   }
 
+  private summarizeForSender(text: string, resonanceScore: number = 0) {
+    const warm = resonanceScore >= 70;
+    const nearWall = resonanceScore >= 85;
+
+    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
+      return warm ? '你热情地向对方打了招呼' : '你向对方问好';
+    }
+    if (/^(谢|感谢|多谢)/.test(text)) {
+      return warm ? '你真诚地向对方表达了谢意' : '你表达了感谢';
+    }
+    if (/^(再见|拜拜|bye)/i.test(text)) {
+      return '你向对方道别';
+    }
+    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
+      return warm
+        ? '你和对方分享了最近的累和压力'
+        : '你分享了最近的疲惫感受';
+    }
+    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
+      return warm ? '你兴奋地分享了一个开心的事' : '你分享了一些积极的心情';
+    }
+    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
+      return warm
+        ? '你向对方吐露了一些低落的情绪'
+        : '你表达了低落的情绪';
+    }
+    if (/(\?|？|吗|呢|吧$)/.test(text)) {
+      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
+    }
+    if (text.length <= 6) {
+      return '你发了一条简短消息';
+    }
+
+    if (nearWall) {
+      return `你认真地分享了一段想法（约${text.length}字）`;
+    }
+    if (warm) {
+      return `你和对方分享了一段详细的想法（约${text.length}字）`;
+    }
+    return `你分享了一段想法（约${text.length}字）`;
+  }
+
+  /** Convert receiver-perspective text to sender-perspective (for AI-generated text) */
+  private toSenderPerspective(receiverText: string): string {
+    const placeholder = '\x00PEER\x00';
+    let text = receiverText;
+    text = text.replace(/对方/g, placeholder);
+    text = text.replace(/向你/g, '向对方');
+    text = text.replace(/和你/g, '和对方');
+    text = text.replace(/给你/g, '给对方');
+    text = text.replace(/跟你/g, '跟对方');
+    text = text.replace(/你们/g, '你们');
+    text = text.replace(new RegExp(placeholder.replace(/\x00/g, '\\x00'), 'g'), '你');
+    text = text.replace(/发来了/g, '发了');
+    return text;
+  }
+
   private getRelayIntensityInstruction(resonanceScore: number): string {
     if (resonanceScore >= 85) {
       return [
@@ -776,16 +850,24 @@ export class SandboxService {
   }
 
   private normalizeHiddenTagUpdateMap(raw: Record<string, number>) {
+    const ENGLISH_TO_CHINESE: Record<string, string> = {
+      'harassment_tendency': '骚扰倾向',
+      'empathy': '共情能力',
+      'emotional_stability': '情绪稳定',
+      'conflict_tolerance': '冲突容忍度',
+      'boundary_respect': '边界尊重',
+    };
     const output: Record<string, number> = {};
 
     for (const [key, value] of Object.entries(raw)) {
-      const normalizedKey = key
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_]+/g, '_')
-        .slice(0, 64);
+      let normalizedKey = key.trim().slice(0, 64);
       if (!normalizedKey) {
         continue;
+      }
+      // Translate English keys to Chinese
+      const lower = normalizedKey.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+      if (ENGLISH_TO_CHINESE[lower]) {
+        normalizedKey = ENGLISH_TO_CHINESE[lower];
       }
 
       const numeric = Number(value);
@@ -818,7 +900,7 @@ export class SandboxService {
         select: { weight: true },
       });
 
-      const baseline = tagName === 'harassment_tendency' ? 1 : 5;
+      const baseline = tagName === '骚扰倾向' ? 1 : 5;
       const nextWeight = Math.max(
         0,
         Math.min(10, (existing?.weight ?? baseline) + delta),

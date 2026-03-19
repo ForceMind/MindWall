@@ -17,9 +17,10 @@ const loading = ref(false);
 const pageError = ref('');
 const detail = ref<Record<string, any> | null>(null);
 
-const activeTab = ref<'timeline' | 'ai'>('timeline');
+const activeTab = ref<'timeline' | 'ai' | 'interview'>('timeline');
 const timelinePage = ref(1);
 const aiPage = ref(1);
+const activeInterviewSession = ref('');
 const PAGE_SIZE = 15;
 
 const paginatedTimeline = computed(() => {
@@ -36,6 +37,20 @@ const paginatedAiRecords = computed(() => {
 });
 const aiTotalPages = computed(() => Math.max(1, Math.ceil((detail.value?.recent?.ai_records?.length || 0) / PAGE_SIZE)));
 
+const interviewSessionList = computed(() => detail.value?.interview?.sessions || []);
+const activeSessionMeta = computed(() => interviewSessionList.value.find((s: any) => s.id === activeInterviewSession.value));
+const activeInterviewRecords = computed(() => {
+  const all = detail.value?.interview?.records || [];
+  if (!activeInterviewSession.value) return all;
+  return all.filter((r: any) => r.session_id === activeInterviewSession.value);
+});
+
+function sessionTypeLabel(type?: string) {
+  if (type === 'deep') return '深度访谈';
+  if (type === 'refresh') return '标签刷新';
+  return '初次访谈';
+}
+
 const userId = computed(() => String(route.params.userId || ''));
 const user = computed(() => detail.value?.user || null);
 
@@ -49,6 +64,10 @@ async function load() {
   try {
     const payload = await fetchAdminUserDetail(adminStore.token, userId.value);
     detail.value = payload;
+    const sessions = payload?.interview?.sessions || [];
+    if (sessions.length > 0 && !activeInterviewSession.value) {
+      activeInterviewSession.value = sessions[0].id;
+    }
   } catch (error) {
     pageError.value = toErrorMessage(error);
   } finally {
@@ -158,6 +177,12 @@ onMounted(() => {
           >
             最近 AI 记录
           </button>
+          <button 
+            :class="['btn', activeTab === 'interview' ? 'btn-primary' : 'btn-ghost']" 
+            @click="activeTab = 'interview'"
+          >
+            访谈记录 ({{ detail?.interview?.total_turns || 0 }})
+          </button>
         </div>
 
         <div v-if="activeTab === 'timeline'">
@@ -211,6 +236,50 @@ onMounted(() => {
             <button class="btn btn-ghost" type="button" :disabled="aiPage <= 1" @click="aiPage -= 1">上一页</button>
             <span class="muted">第 {{ aiPage }} / {{ aiTotalPages }} 页 (共 {{ detail.recent?.ai_records?.length || 0 }} 条)</span>
             <button class="btn btn-ghost" type="button" :disabled="aiPage >= aiTotalPages" @click="aiPage += 1">下一页</button>
+          </div>
+        </div>
+
+        <div v-if="activeTab === 'interview'">
+          <div v-if="interviewSessionList.length > 0" class="tabs" style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+            <button
+              v-for="(sess, idx) in interviewSessionList"
+              :key="sess.id"
+              :class="['btn', activeInterviewSession === sess.id ? 'btn-secondary' : 'btn-ghost']"
+              style="font-size: 13px"
+              @click="activeInterviewSession = sess.id"
+            >
+              {{ sessionTypeLabel(sess.type) }} #{{ idx + 1 }}
+              <span v-if="sess.status !== 'completed'" class="badge badge-warning" style="margin-left: 4px; font-size: 10px">进行中</span>
+            </button>
+          </div>
+
+          <div v-if="activeInterviewSession" style="margin-bottom: 10px">
+            <span class="muted" style="font-size: 12px">
+              {{ sessionTypeLabel(activeSessionMeta?.type) }}
+              · 共 {{ activeSessionMeta?.total_questions }} 题
+              · 已答 {{ activeSessionMeta?.answer_count }} 题
+              · {{ formatDateTime(activeSessionMeta?.created_at) }}
+            </span>
+          </div>
+
+          <div class="card-list">
+            <article
+              v-for="record in activeInterviewRecords"
+              :key="record.id"
+              class="list-card"
+              :style="{ borderLeft: record.role === 'assistant' ? '3px solid var(--accent-cool, #3baa85)' : '3px solid var(--border-color)' }"
+            >
+              <div class="row" style="justify-content: space-between; margin-bottom: 4px">
+                <strong>{{ record.role === 'assistant' ? '🤖 AI 提问' : '👤 用户回答' }}</strong>
+                <span class="muted" style="font-size: 12px">{{ formatDateTime(record.created_at) }}</span>
+              </div>
+              <div style="white-space: pre-wrap; line-height: 1.6">{{ record.content }}</div>
+              <div class="muted" style="font-size: 11px; margin-top: 4px">轮次 {{ record.turn_index + 1 }}</div>
+            </article>
+
+            <div v-if="activeInterviewRecords.length === 0" class="empty-box">
+              {{ interviewSessionList.length === 0 ? '暂无访谈记录' : '该会话暂无记录' }}
+            </div>
           </div>
         </div>
       </div>

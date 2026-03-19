@@ -404,6 +404,7 @@ export class SandboxGatewayService implements OnModuleInit, OnModuleDestroy {
       receiver_id: result.receiverId,
       original_text: result.originalText,
       text: result.rewrittenText,
+      sender_summary: result.senderSummary,
       ai_action: result.aiAction,
       resonance_score: result.resonanceScore,
       created_at: result.createdAt,

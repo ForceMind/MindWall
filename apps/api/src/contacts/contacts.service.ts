@@ -161,8 +161,8 @@ export class ContactsService {
     const skip = (page - 1) * limit;
 
     const isActiveTab = tab === 'active';
-    const matchStatuses: MatchStatus[] = isActiveTab 
-      ? [MatchStatus.pending, MatchStatus.active_sandbox, MatchStatus.wall_broken]
+    const matchStatuses: MatchStatus[] = isActiveTab
+        ? [MatchStatus.active_sandbox, MatchStatus.wall_broken]
       : [MatchStatus.rejected];
       
     const aiStatuses = isActiveTab ? ['active', 'active_sandbox'] : ['closed', 'history'];
@@ -172,6 +172,8 @@ export class ContactsService {
         where: {
           OR: [{ user_a_id: userId }, { user_b_id: userId }],
           status: { in: matchStatuses },
+          // Only show matches that have at least one message
+          messages: { some: {} },
         },
         orderBy: [{ updated_at: 'desc' }],
         select: {

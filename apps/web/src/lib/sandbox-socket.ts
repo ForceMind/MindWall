@@ -19,6 +19,7 @@ export class SandboxSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private intentionallyClosed = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   connect(userId: string) {
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) {
@@ -38,6 +39,7 @@ export class SandboxSocket {
       this.reconnectAttempts = 0;
       this.send({ type: 'auth', user_id: this.userId });
       this.flushQueue();
+      this.startHeartbeat();
     });
 
     this.socket.addEventListener('message', (event) => {
@@ -55,6 +57,7 @@ export class SandboxSocket {
 
     this.socket.addEventListener('close', () => {
       this.socket = null;
+      this.stopHeartbeat();
       if (this.intentionallyClosed) return;
       this.scheduleReconnect();
     });
@@ -83,6 +86,7 @@ export class SandboxSocket {
   close() {
     this.intentionallyClosed = true;
     this.queue = [];
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -117,6 +121,20 @@ export class SandboxSocket {
 
   sendWallDecision(matchId: string, accept: boolean) {
     this.send({ type: 'wall_break_decision', match_id: matchId, accept });
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      this.send({ type: 'ping' });
+    }, 30_000);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   private send(payload: Record<string, unknown>) {

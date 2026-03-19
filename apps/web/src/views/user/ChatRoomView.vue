@@ -147,11 +147,13 @@ function stopSocket() {
 }
 
 function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
+    const isSandbox = !wall.value?.wallBroken;
   if (item.ai_action === 'blocked') {
+    const isMine = item.sender_id === myUserId;
     return {
       id: item.message_id,
-      text: '你的一条消息被安全中间层拦截。',
-      mine: false,
+      text: isMine ? '你的一条消息被安全中间层拦截。' : '',
+      mine: isMine,
       kind: 'system',
       time: item.created_at,
     };
@@ -163,10 +165,10 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
   if (isMine) {
     return {
       id: item.message_id,
-      text: item.ai_rewritten_text,
+      text: (isSandbox && item.sender_rewritten_text) ? item.sender_rewritten_text : item.ai_rewritten_text,
       originalText: isRewritten ? item.original_text : undefined,
       mine: true,
-      kind: isRewritten ? 'ai-relay' : 'text',
+      kind: (isRewritten || isSandbox) ? 'ai-relay' : 'text',
       time: item.created_at,
       aiAction: item.ai_action,
     };
@@ -176,7 +178,7 @@ function mapHistoryMessage(item: SandboxMessage, myUserId: string): UiMessage {
     id: item.message_id,
     text: item.ai_rewritten_text,
     mine: false,
-    kind: isRewritten ? 'ai-relay' : 'text',
+    kind: (isRewritten || isSandbox) ? 'ai-relay' : 'text',
     time: item.created_at,
     aiAction: item.ai_action,
   };
@@ -202,7 +204,11 @@ function handleSocketEvent(event: SandboxInbound) {
   if (type === 'auth_ok') {
     if (socketRef.value && id.value) {
       socketRef.value.joinMatch(id.value);
-      socketRef.value.fetchHistory(id.value, 100);
+      // On reconnect, re-fetch history to catch messages missed during WS downtime.
+      // pushMessage deduplicates by ID so no duplicates will appear.
+      if (messages.value.length > 0) {
+        socketRef.value.fetchHistory(id.value);
+      }
       socketRef.value.fetchWallState(id.value);
     }
     return;
@@ -220,26 +226,29 @@ function handleSocketEvent(event: SandboxInbound) {
     sending.value = false;
     const originalText = String(event.original_text || '');
     const rewrittenText = String(event.text || '');
+    const senderSummary = String(event.sender_summary || '');
     const aiAction = String(event.ai_action || 'passed');
     const isRewritten = aiAction === 'modified' || (originalText && rewrittenText !== originalText);
+      const isSandbox = !wall.value?.wallBroken;
+    const displayText = (isSandbox && senderSummary) ? senderSummary : rewrittenText;
 
     const pendingIndex = messages.value.findLastIndex(m => m.mine && m.id.startsWith('pending-') && m.text === originalText);
     
     if (pendingIndex !== -1) {
       const existing = messages.value[pendingIndex];
       existing.id = String(event.message_id || existing.id);
-      existing.text = rewrittenText;
+      existing.text = displayText;
       existing.originalText = isRewritten ? originalText : undefined;
-      existing.kind = isRewritten ? 'ai-relay' : 'text';
+      existing.kind = (isRewritten || isSandbox) ? 'ai-relay' : 'text';
       existing.aiAction = aiAction;
       existing.time = String(event.created_at || new Date().toISOString());
     } else {
       pushMessage({
         id: String(event.message_id || `mine-${Date.now()}`),
-        text: rewrittenText,
+        text: displayText,
         originalText: isRewritten ? originalText : undefined,
         mine: true,
-        kind: isRewritten ? 'ai-relay' : 'text',
+        kind: (isRewritten || isSandbox) ? 'ai-relay' : 'text',
         time: String(event.created_at || new Date().toISOString()),
         aiAction,
       });
@@ -372,13 +381,14 @@ async function initAiChat() {
            id: m.id,
            text: m.text,
            mine: m.role === 'user',
-           kind: 'text',
+           kind: (m.role === "user" || wall.value?.wallBroken) ? "text" : "ai-relay",
            time: m.created_at,
          }));
          for (const item of messages.value) {
            messageIdSet.add(item.id);
          }
       } else {
+         // Persona ID (e.g., ai_psychologist) - new session, no history yet
          actualPersonaId.value = id.value;
          aiSessionId.value = '';
          title.value = '匹配对象';
@@ -478,9 +488,15 @@ async function sendMessage() {
     const history = buildCompanionHistory();
     
       const payload = await askCompanion(userStore.token, actualPersonaId.value, history, aiSessionId.value);
+      // Fake thinking and typing delay for human-like realism
+      const delay = Math.min(1500 + (payload.reply.length * 50), 6000);
+      await new Promise(r => setTimeout(r, delay));
       if (payload.session_id) {
         aiSessionId.value = payload.session_id;
-        // Optionally update the URL silently so refresh works, but we can also just leave it since the user relies on Match List
+        // Silently update URL so future navigation loads the correct session
+        if (id.value.startsWith('ai_')) {
+          window.history.replaceState({}, '', `/chat/ai/${payload.session_id}`);
+        }
       }
       pushMessage({
         id: `a-${Date.now()}`,
@@ -606,11 +622,11 @@ onBeforeUnmount(() => {
           class="bubble"
           :class="[item.mine ? 'me' : '', item.kind === 'system' ? 'system' : '', item.kind === 'ai-relay' ? 'ai-relay' : '']"
         >
-          <div v-if="item.kind === 'ai-relay' && !item.mine" class="ai-relay-badge">AI 转述</div>
           <div>{{ item.text }}</div>
-          <div v-if="item.mine && item.originalText" class="original-text">
-            <span class="original-label">你的原文：</span>{{ item.originalText }}
+          <div v-if="item.kind === 'ai-relay' && item.mine && item.originalText" class="original-text">
+            <span class="original-label">原文：</span>{{ item.originalText }}
           </div>
+          <div v-if="item.kind === 'ai-relay' && !item.mine" class="original-text"><span class="original-label">来自 AI 转述</span></div>
           <div class="bubble-meta">{{ formatTime(item.time) }}</div>
         </div>
 

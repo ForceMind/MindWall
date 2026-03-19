@@ -637,20 +637,23 @@ export class OnboardingService {
     const defaultPrompt = [
       'You are the interview guide for 有间, an anonymous social platform focused on the modern inner world.',
       '有间 wants to understand users through warm, positive conversations that feel safe and encouraging.',
-      'Ask exactly one emotionally warm Chinese question.',
+      'Generate exactly one warm Chinese follow-up that consists of two parts:',
+      '1. A brief acknowledgment (1 sentence) that specifically references what the user just said — use their actual words or meaning, not generic empathy like "听起来挺有感触" or "这段经历".',
+      '2. A natural follow-up question that flows from what the user shared.',
       'Do not ask about hobbies, food, travel, favorite movies, career trivia, MBTI, or any shallow profile questions.',
       'The question should feel warm, curious, and non-judgmental. Start from positive angles (strengths, hopes, values, good experiences).',
-      'Return strict JSON only: {"question":"..."}',
+      'Return strict JSON only: {"question":"<acknowledgment + question combined>"}',
       'Requirements:',
       '- Chinese only',
       '- No numbering',
       '- One question only',
-      '- 20-60 Chinese characters',
+      '- 25-80 Chinese characters (acknowledgment + question)',
       '- For early turns (1-2): focus on positive qualities, strengths, values, good memories, what makes the user unique',
       '- For later turns (3+): gently explore self-perception, boundaries, how the user wants to be understood',
       '- Never start with heavy or painful topics. Approach depth gradually.',
       '- Talk like a real friend or gentle counselor. Be natural and conversational.',
-      '- Every turn must switch to a different focus from previous turns',
+      '- Your follow-up must logically connect to what the user just said. Do NOT suddenly jump to an unrelated topic.',
+      '- Gradually shift focus across turns, but each question must still feel like a natural continuation of the conversation.',
       '- Never repeat any previous question in wording or intent',
     ].join('\n');
     const promptTemplate = await this.promptTemplateService.getPrompt(
@@ -662,13 +665,15 @@ export class OnboardingService {
       '- Ask one question only',
       isSkipAction 
         ? '- The user just skipped or did not understand the previous question. You MUST generate a completely DIFFERENT, easier question from a new angle. DO NOT quote or mention that they asked to skip.'
-        : '- You must sound like a real, empathetic human. Do NOT use stiff template phrases like "你如何理解..." or "XXX代表的深层意义".',
-      '- If the user\'s answer is very brief (like one or two words), briefly acknowledge their feeling, then ask a natural related open question.',
-      '- Do NOT directly quote the user mechanically (e.g. do not say "关于‘某词’...").',
+        : '- You must sound like a real, empathetic human. Do NOT use stiff template phrases like "你如何理解...", "XXX代表的深层意义", "听起来挺有感触", "这段经历教会了你什么".',
+      '- Your acknowledgment MUST paraphrase or reference the specific content of the user\'s latest answer. Forbidden generic phrases: "听起来...", "这段经历...", "感觉你...". Instead, pick up a concrete detail from their answer.',
+      '- If the user\'s answer is very brief (like one or two words), gently reflect what they said, then ask a natural open question that deepens THAT specific point.',
+      '- Do NOT directly quote the user with quotation marks. Instead, naturally weave their meaning into your response.',
       '- Must not repeat previous questions',
       '- Chinese only',
       '- Must be open-ended and require narration',
       '- Do NOT use yes/no style such as 是否、会不会、有没有、是不是、能不能',
+      '- Do NOT reference experiences or events the user did not mention. If they stated a belief or value, ask about THAT, not about a hypothetical "experience".',
     ].join('\n');
     const prompt = [
       promptTemplate,
@@ -688,7 +693,7 @@ export class OnboardingService {
       userId,
       feature: 'onboarding.question',
       promptKey: 'onboarding.question',
-      temperature: 0.78,
+      temperature: 0.65,
     });
     const question = data?.question?.trim();
     if (!question) {
@@ -761,7 +766,7 @@ export class OnboardingService {
       this.normalizeTag(tag, 1, '自我觉察者', '基于访谈内容生成的公开画像标签。'),
     );
     const hiddenTags = extracted.hidden_system_traits.map((tag) =>
-      this.normalizeTag(tag, 10, 'emotional_stability', '基于访谈内容生成的隐藏系统画像。'),
+      this.normalizeTag(tag, 10, '情绪稳定', '基于访谈内容生成的隐藏系统画像。'),
     );
 
     for (const tag of publicTags) {
@@ -856,13 +861,13 @@ export class OnboardingService {
         this.normalizeTag(
           tag,
           10,
-          'emotional_stability',
+          '情绪稳定',
           '基于访谈内容生成的隐藏系统画像。',
         ),
       )
       .slice(0, 10);
 
-    if (!hiddenTags.some((tag) => tag.tag_name === '骚扰倾向' || tag.tag_name === 'harassment_tendency')) {
+    if (!hiddenTags.some((tag) => tag.tag_name === '骚扰倾向')) {
       hiddenTags.push({
         tag_name: '骚扰倾向',
         weight: 1,
@@ -912,8 +917,24 @@ export class OnboardingService {
         ? Number(clampedWeight.toFixed(3))
         : Number(clampedWeight.toFixed(2));
 
+    const ENGLISH_TO_CHINESE_TAGS: Record<string, string> = {
+      'emotional_stability': '情绪稳定',
+      'harassment_tendency': '骚扰倾向',
+      'empathy': '共情能力',
+      'conflict_tolerance': '冲突容忍度',
+      'boundary_respect': '边界尊重',
+      'attachment_style': '依恋风格',
+      'self_awareness': '自我觉察',
+      'openness': '开放性',
+    };
+    let rawName = (tag.tag_name || fallbackName).trim().slice(0, 64);
+    // If the tag name is in English, translate to Chinese
+    if (/^[a-zA-Z_]+$/.test(rawName)) {
+      rawName = ENGLISH_TO_CHINESE_TAGS[rawName.toLowerCase()] || fallbackName;
+    }
+
     return {
-      tag_name: (tag.tag_name || fallbackName).trim().slice(0, 64),
+      tag_name: rawName,
       weight,
       ai_justification:
         (tag.ai_justification || fallbackJustification).trim().slice(0, 280),

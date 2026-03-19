@@ -154,6 +154,7 @@ export class AdminDashboardService {
       publicTags,
       hiddenTags,
       interviewRecords,
+      interviewSessions,
       sessions,
       totalMatches,
       recentMatches,
@@ -202,6 +203,18 @@ export class AdminDashboardService {
           role: true,
           content: true,
           created_at: true,
+        },
+      }),
+      this.prisma.onboardingInterviewSession.findMany({
+        where: { user_id: userId },
+        orderBy: { created_at: 'asc' },
+        select: {
+          id: true,
+          status: true,
+          total_questions: true,
+          answer_count: true,
+          created_at: true,
+          completed_at: true,
         },
       }),
       this.prisma.authSession.findMany({
@@ -401,6 +414,15 @@ export class AdminDashboardService {
       },
       interview: {
         total_turns: interviewRecords.length,
+        sessions: interviewSessions.map((s) => ({
+          id: s.id,
+          type: s.total_questions >= 8 ? 'deep' : s.total_questions <= 3 ? 'refresh' : 'onboarding',
+          status: s.status,
+          total_questions: s.total_questions,
+          answer_count: s.answer_count,
+          created_at: s.created_at,
+          completed_at: s.completed_at,
+        })),
         records: interviewRecords,
       },
       tag_source: {

@@ -148,12 +148,12 @@ async function main() {
     ],
     [
       {
-        tag_name: 'harassment_tendency',
+        tag_name: '骚扰倾向',
         weight: 1,
         ai_justification: '初始低风险。',
       },
       {
-        tag_name: 'empathy',
+        tag_name: '共情能力',
         weight: 7.6,
         ai_justification: '具备较高同理心。',
       },
@@ -176,12 +176,12 @@ async function main() {
     ],
     [
       {
-        tag_name: 'harassment_tendency',
+        tag_name: '骚扰倾向',
         weight: 1,
         ai_justification: '初始低风险。',
       },
       {
-        tag_name: 'emotional_stability',
+        tag_name: '情绪稳定',
         weight: 7.4,
         ai_justification: '情绪表达稳定。',
       },
