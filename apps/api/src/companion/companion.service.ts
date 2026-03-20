@@ -879,10 +879,10 @@ export class CompanionService {
       const systemContent = [
         '你是匿名社交平台的消息转述助手。你的任务是将一条消息转述为中性的动作描述。',
         '转述规则：',
-        '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果消息问"去哪里"，转述必须体现"去哪里"；如果消息聊"咖啡"，转述必须提到"咖啡"。',
+        '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果消息问"去哪里"，转述必须体现"去哪里"；如果消息聊"咖啡"，转述必须提到"咖啡"。绝对禁止把有具体内容的消息压缩成"提了一个问题""分享了想法"这类空洞描述。',
         '2. 只转述当前这一条消息，不要加入额外上下文。',
         '3. 输出中性动作描述，不要加主语（不要以"你""对方""他/她"开头），直接描述动作。',
-        '4. 转述 6-18 个字，简洁有信息量。',
+        '4. 转述 6-25 个字，简洁但必须有具体信息量。',
         `5. ${toneHint}`,
         '6. 严格只返回纯文本，不加 JSON、markdown 或引号。',
         '',
@@ -895,10 +895,14 @@ export class CompanionService {
         '"早啊，快进来坐" → 热情问好，邀请进来坐',
         '"哈哈 不会累的" → 表示不会累',
         '"这两个能一起吃吗？" → 问了两样东西能否一起吃',
+        '"诶你好，这个挺有意思的，然后呢" → 觉得打招呼挺有意思，追问后续',
+        '"我觉得还行吧，看情况" → 表示觉得还行，看情况而定',
         '',
         '错误示例（不要这样写）：',
         '"你好" → "你打了个招呼" ← 错误！不要加主语"你"',
         '"你好" → "对方打了招呼" ← 错误！不要加主语"对方"',
+        '"诶你好，这个挺有意思的，然后呢" → "提了一个问题" ← 错误！丢失了具体内容',
+        '"我最近挺忙的" → "分享了想法" ← 错误！必须保留"忙"这个具体信息',
       ].join('\n');
 
       const makeRelayCall = async (text: string, label: string) => {
@@ -1120,6 +1124,12 @@ export class CompanionService {
       if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
         return warm ? '关心地询问了心情' : '询问了关于心情的话题';
       }
+      // For questions with actual content, extract a brief topic instead of generic "提了一个问题"
+      if (text.length > 6) {
+        // Strip question markers and extract core content
+        const core = text.replace(/[?？\s]+$/g, '').replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
+        return warm ? `好奇地问了关于${core}的话题` : `问了关于${core}的话题`;
+      }
       return warm ? '好奇地提了一个问题' : '提了一个问题';
     }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
@@ -1132,9 +1142,13 @@ export class CompanionService {
       return warm ? '吐露了一些低落的情绪' : '表达了低落的情绪';
     }
     if (text.length <= 6) return '发了一条简短消息';
-    if (nearWall) return `认真地分享了一段想法（约${text.length}字）`;
-    if (warm) return `分享了一段详细的想法（约${text.length}字）`;
-    return `分享了一段想法（约${text.length}字）`;
+    // For longer non-question messages without emotion keywords, extract topic
+    {
+      const core = text.replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
+      if (nearWall) return `认真地聊了${core}`;
+      if (warm) return `聊了${core}`;
+      return `聊了${core}`;
+    }
   }
 
   /** 给中性描述加上视角前缀，同时替换内容中的人称代词 */

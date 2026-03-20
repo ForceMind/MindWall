@@ -561,7 +561,8 @@ export class OnboardingService {
       '【判定规则，按顺序匹配】',
       '1. 如果是纯语气词敷衍（如"哈哈"、"哦"）、瞎打的乱码（如"111"）、人身攻击或调侃（如"你有病"、"你妈"、"傻逼"）、与访谈毫无关系的胡言乱语 -> valid: false, is_skip: false。此时在 reason 里给出一句自然的第一人称回怼或提醒（如："哎呀不要开玩笑啦，认真回答一下好吗？"或"我听不太懂，这好像跟问题无关哦。"）',
       '2. 如果用户明确要求跳过、换一题、或者表示看不懂、不知道怎么回答、太难了、不想说 -> valid: true, is_skip: true',
-      '3. 如果用户正在提供哪怕非常简短的个人状态、经历、感受（如"输钱"、"累"、"失眠"、"挺好的"） -> valid: true, is_skip: false',
+      '3. 关键：必须结合当前提问来判断。如果用户的回答是对提问的合理回应（包括简短的"会"、"不会"、"是"、"不是"、"有"、"没有"、"对"、"好"等），即使只有一两个字，也必须判定为 valid: true, is_skip: false',
+      '4. 如果用户正在提供哪怕非常简短的个人状态、经历、感受（如"输钱"、"累"、"失眠"、"挺好的"） -> valid: true, is_skip: false',
       '',
       '注意：对于用户的真实经历（如"输钱"、"分手"）要判定为 valid: true；但如果是明显的调戏敷衍（如"哈哈"、"你有兵"），必须判定为 valid: false 并给出合理的 reason 提醒！',
     ].join('\n');
@@ -637,6 +638,7 @@ export class OnboardingService {
     const defaultPrompt = [
       'You are the interview guide for 有间, an anonymous social platform focused on the modern inner world.',
       '有间 wants to understand users through warm, positive conversations that feel safe and encouraging.',
+      'CRITICAL: This is a brand-new user you know NOTHING about. You have zero knowledge of their past. Do NOT assume or reference any prior experiences, events, or history.',
       'Generate exactly one warm Chinese follow-up that consists of two parts:',
       '1. A brief acknowledgment (1 sentence) that specifically references what the user just said — use their actual words or meaning, not generic empathy like "听起来挺有感触" or "这段经历".',
       '2. A natural follow-up question that flows from what the user shared.',
@@ -673,6 +675,7 @@ export class OnboardingService {
       '- Chinese only',
       '- Must be open-ended and require narration',
       '- Do NOT use yes/no style such as 是否、会不会、有没有、是不是、能不能',
+      '- NEVER say "你之前""你之前提到""你曾经" — you have no knowledge of the user\'s past. Only reference what user explicitly said in THIS interview.',
       '- Do NOT reference experiences or events the user did not mention. If they stated a belief or value, ask about THAT, not about a hypothetical "experience".',
     ].join('\n');
     const prompt = [

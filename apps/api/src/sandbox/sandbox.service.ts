@@ -750,6 +750,11 @@ export class SandboxService {
       if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
         return warm ? '关心地询问了心情' : '询问了关于心情的话题';
       }
+      // For questions with actual content, extract a brief topic instead of generic "提了一个问题"
+      if (text.length > 6) {
+        const core = text.replace(/[?？\s]+$/g, '').replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
+        return warm ? `好奇地问了关于${core}的话题` : `问了关于${core}的话题`;
+      }
       return warm ? '好奇地提了一个问题' : '提了一个问题';
     }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
@@ -764,13 +769,13 @@ export class SandboxService {
     if (text.length <= 6) {
       return '发了一条简短消息';
     }
-    if (nearWall) {
-      return `认真地分享了一段想法（约${text.length}字）`;
+    // For longer non-question messages without emotion keywords, extract topic
+    {
+      const core = text.replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
+      if (nearWall) return `认真地聊了${core}`;
+      if (warm) return `聊了${core}`;
+      return `聊了${core}`;
     }
-    if (warm) {
-      return `分享了一段详细的想法（约${text.length}字）`;
-    }
-    return `分享了一段想法（约${text.length}字）`;
   }
 
   /** Convert receiver-perspective text to sender-perspective (for AI-generated text) */
