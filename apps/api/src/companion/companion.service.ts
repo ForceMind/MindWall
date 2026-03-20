@@ -402,7 +402,7 @@ export class CompanionService {
 
     let reply = isPsychologist
       ? (aiReply || fallbackReply).trim().slice(0, 400) || fallbackReply
-      : this.sanitizeReply(aiReply || fallbackReply, fallbackReply);
+      : this.sanitizeReply(aiReply || fallbackReply, fallbackReply, lastUserMessage);
 
     if (!isPsychologist && aiReply && reply === fallbackReply) {
       this.logger.warn(`Companion AI reply was sanitized away for user ${userId}. Original: "${aiReply.slice(0, 80)}"`);
@@ -758,7 +758,7 @@ export class CompanionService {
     return stagePrompts[stage] || stagePrompts[1];
   }
 
-  private sanitizeReply(reply: string, fallbackReply: string) {
+  private sanitizeReply(reply: string, fallbackReply: string, userMessage?: string) {
     const trimmed = (reply || '').trim().slice(0, 260);
     if (!trimmed) {
       return fallbackReply;
@@ -768,6 +768,16 @@ export class CompanionService {
       /(作为\s*ai|我是\s*ai|人工智能|语言模型|机器人|虚拟助手|系统提示|prompt|模型接口|程序生成)/i;
     if (forbiddenPattern.test(trimmed)) {
       return fallbackReply;
+    }
+
+    // Detect parrot replies: AI quotes user message back or echoes it verbatim
+    if (userMessage && userMessage.length >= 3) {
+      const normalizedUser = userMessage.replace(/[^\u4e00-\u9fff\w]/g, '');
+      const normalizedReply = trimmed.replace(/[^\u4e00-\u9fff\w]/g, '');
+      // If reply contains the full user message or >60% overlap, it's likely parroting
+      if (normalizedUser.length >= 3 && normalizedReply.includes(normalizedUser)) {
+        return fallbackReply;
+      }
     }
 
     return trimmed;
@@ -906,46 +916,53 @@ export class CompanionService {
       ].join('\n');
 
       const makeRelayCall = async (text: string, label: string) => {
-        const resp = await fetch(
-          this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
+        const relayMessages = [
+          { role: 'system', content: systemContent },
+          { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
+        ];
+        let resp: Response;
+        try {
+          resp = await fetch(
+            this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model: aiConfig.openaiModel,
+                temperature: 0.3,
+                messages: relayMessages,
+              }),
             },
-            body: JSON.stringify({
-              model: aiConfig.openaiModel,
-              temperature: 0.3,
-              messages: [
-                { role: 'system', content: systemContent },
-                { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
-              ],
-            }),
-          },
-        );
-        if (!resp.ok) return null;
+          );
+        } catch (fetchErr) {
+          this.logger.warn(`Relay fetch error [${label}]: ${(fetchErr as Error).message}`);
+          return null;
+        }
+        if (!resp.ok) {
+          const detail = await resp.text().catch(() => '');
+          this.logger.warn(`Relay API failed [${label}]: ${resp.status} ${detail.slice(0, 200)}`);
+          return null;
+        }
         const payload = (await resp.json()) as any;
         const content = payload.choices?.[0]?.message?.content?.trim();
-        if (content) {
-          await this.aiUsageService.logGeneration({
-            userId,
-            feature: `companion.relay_${label}`,
-            promptKey: `companion.relay_${label}`,
-            provider: 'openai',
-            model: aiConfig.openaiModel,
-            inputTokens: payload.usage?.prompt_tokens || 0,
-            outputTokens: payload.usage?.completion_tokens || 0,
-            totalTokens: payload.usage?.total_tokens || 0,
-            metadata: {
-              prompt: [
-                { role: 'system', content: systemContent },
-                { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
-              ],
-              response: content,
-            },
-          });
-        }
+        // Always log relay usage — even if content is empty (for debugging)
+        await this.aiUsageService.logGeneration({
+          userId,
+          feature: `companion.relay_${label}`,
+          promptKey: `companion.relay_${label}`,
+          provider: 'openai',
+          model: aiConfig.openaiModel,
+          inputTokens: payload.usage?.prompt_tokens || 0,
+          outputTokens: payload.usage?.completion_tokens || 0,
+          totalTokens: payload.usage?.total_tokens || 0,
+          metadata: {
+            prompt: relayMessages,
+            response: content || null,
+          },
+        });
         // Strip leading subject if AI still adds one (Chinese has no space between subject and verb)
         return content ? content.replace(/^(你|对方|他|她)/, '') : null;
       };
@@ -1124,11 +1141,13 @@ export class CompanionService {
       if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
         return warm ? '关心地询问了心情' : '询问了关于心情的话题';
       }
-      // For questions with actual content, extract a brief topic instead of generic "提了一个问题"
+      // For questions with actual content, try to extract a clean topic keyword
       if (text.length > 6) {
-        // Strip question markers and extract core content
-        const core = text.replace(/[?？\s]+$/g, '').replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
-        return warm ? `好奇地问了关于${core}的话题` : `问了关于${core}的话题`;
+        // Try to match common topic patterns
+        const topicMatch = text.match(/(喜欢|喝|吃|看|玩|学|做|去|买|听|聊|想|说|问|找|用|穿|住|选|教)[^\s，。？！]{1,6}/);
+        if (topicMatch) {
+          return warm ? `好奇地问了关于${topicMatch[0]}的事` : `问了关于${topicMatch[0]}的事`;
+        }
       }
       return warm ? '好奇地提了一个问题' : '提了一个问题';
     }
@@ -1142,13 +1161,9 @@ export class CompanionService {
       return warm ? '吐露了一些低落的情绪' : '表达了低落的情绪';
     }
     if (text.length <= 6) return '发了一条简短消息';
-    // For longer non-question messages without emotion keywords, extract topic
-    {
-      const core = text.replace(/^(诶|哎|嘿|那|哦|嗯)[，,]?\s*/g, '').slice(0, 15);
-      if (nearWall) return `认真地聊了${core}`;
-      if (warm) return `聊了${core}`;
-      return `聊了${core}`;
-    }
+    if (nearWall) return `认真地分享了一段想法（约${text.length}字）`;
+    if (warm) return `分享了一段详细的想法（约${text.length}字）`;
+    return `分享了一段想法（约${text.length}字）`;
   }
 
   /** 给中性描述加上视角前缀，同时替换内容中的人称代词 */
