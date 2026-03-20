@@ -30,6 +30,7 @@ const form = reactive({
   openai_input_price: 0,
   openai_output_price: 0,
   web_origin: '',
+  maintenance_mode: false,
 });
 
 const testResult = ref<null | {
@@ -70,6 +71,7 @@ async function load() {
     form.openai_input_price = payload.openai_input_price || 0;
     form.openai_output_price = payload.openai_output_price || 0;
     form.web_origin = payload.web_origin || '';
+    form.maintenance_mode = payload.maintenance_mode === true;
     form.openai_api_key = '';
     form.openai_embedding_api_key = '';
 
@@ -95,6 +97,7 @@ function buildPayload(includeWebOrigin: boolean) {
 
   if (includeWebOrigin) {
     payload.web_origin = form.web_origin.trim();
+    payload.maintenance_mode = form.maintenance_mode;
   }
 
   if (!keepExistingKey.value || form.openai_api_key.trim()) {
@@ -165,6 +168,24 @@ onMounted(() => {
 
     <section v-if="pageError" class="panel">
       <div class="panel-body"><span class="badge badge-danger">{{ pageError }}</span></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-body column">
+        <div class="row" style="justify-content: space-between; align-items: center">
+          <div>
+            <h2 class="panel-title">维护模式</h2>
+            <p class="panel-subtitle">开启后前端将显示维护提示，用户无法正常使用。</p>
+          </div>
+          <label class="row-wrap" style="gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
+            <input v-model="form.maintenance_mode" type="checkbox" style="width: 18px; height: 18px;" />
+            {{ form.maintenance_mode ? '维护中' : '正常运行' }}
+          </label>
+        </div>
+        <div v-if="form.maintenance_mode" class="badge badge-danger" style="align-self: flex-start;">
+          ⚠ 维护模式已开启，前端用户将看到维护提示
+        </div>
+      </div>
     </section>
 
     <section class="panel">

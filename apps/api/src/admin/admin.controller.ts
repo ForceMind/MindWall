@@ -48,6 +48,9 @@ export class AdminController {
     if (typeof body.web_origin === 'string') {
       payload.web_origin = body.web_origin;
     }
+    if (typeof body.maintenance_mode === 'boolean') {
+      payload.maintenance_mode = body.maintenance_mode;
+    }
 
     return this.adminConfigService.updateConfig(payload);
   }

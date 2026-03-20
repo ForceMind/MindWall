@@ -276,6 +276,9 @@ export class CompanionService {
         '',
         '回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
         '绝对不要重复之前已经说过的话，每次回复必须有新内容。如果聊天陷入停滞，主动换一个话题。',
+        '',
+        `关系进阶判断：根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
+        '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
       ].join('\n');
     }
 
@@ -297,15 +300,9 @@ export class CompanionService {
       }
     }
 
-    const stageUpInstruction = !isPsychologist ? [
-      '',
-      `另外，根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
-      '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
-    ].join('\n') : '';
-
     chatMessages.push({
       role: 'user',
-      content: lastUserMessage + stageUpInstruction,
+      content: lastUserMessage,
     });
 
     // AI访谈师 does NOT deflect identity probes — it can acknowledge being AI
@@ -787,6 +784,7 @@ export class CompanionService {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const usage = payload.usage;
+      const content = payload.choices?.[0]?.message?.content?.trim();
       await this.aiUsageService.logGeneration({
         userId,
         feature,
@@ -798,9 +796,12 @@ export class CompanionService {
         totalTokens:
           usage?.total_tokens ||
           (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+        metadata: {
+          prompt: messages,
+          response: content || null,
+        },
       });
 
-      const content = payload.choices?.[0]?.message?.content?.trim();
       if (!content) {
         return null;
       }
@@ -900,6 +901,10 @@ export class CompanionService {
         inputTokens: payload.usage?.prompt_tokens || 0,
         outputTokens: payload.usage?.completion_tokens || 0,
         totalTokens: payload.usage?.total_tokens || 0,
+        metadata: {
+          prompt: { userMessage: userMessage.slice(0, 200), aiReply: aiReply.slice(0, 200) },
+          response: content,
+        },
       });
 
       return {
@@ -987,6 +992,10 @@ export class CompanionService {
         inputTokens: payload.usage?.prompt_tokens || 0,
         outputTokens: payload.usage?.completion_tokens || 0,
         totalTokens: payload.usage?.total_tokens || 0,
+        metadata: {
+          prompt: transcript.slice(0, 500),
+          response: content,
+        },
       });
 
       const cleaned = content.replace(/```json?\n?|\n?```/g, '').trim();

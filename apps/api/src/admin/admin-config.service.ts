@@ -74,6 +74,7 @@ export class AdminConfigService {
       openai_input_price: ai.openaiInputPrice,
       openai_output_price: ai.openaiOutputPrice,
       web_origin: ai.webOrigin,
+      maintenance_mode: runtime.maintenance_mode === true,
       source: {
         openai_base_url: runtime.openai_base_url
           ? 'runtime-config'
@@ -165,6 +166,9 @@ export class AdminConfigService {
     if (typeof input.web_origin === 'string') {
       next.web_origin = input.web_origin.trim();
     }
+    if (typeof input.maintenance_mode === 'boolean') {
+      next.maintenance_mode = input.maintenance_mode;
+    }
 
     await this.writeRuntimeConfig(next);
     this.logger.log(`Runtime config updated: ${this.configFile}`);
@@ -173,6 +177,11 @@ export class AdminConfigService {
     });
 
     return this.getPublicConfig();
+  }
+
+  async getMaintenanceStatus() {
+    const runtime = await this.readRuntimeConfig();
+    return { maintenance: runtime.maintenance_mode === true };
   }
 
   async testAiConnectivity(overrides?: RuntimeConfig) {

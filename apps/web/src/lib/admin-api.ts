@@ -140,6 +140,7 @@ export function fetchAdminAiRecords(token: string, page: number, limit: number) 
       total_tokens: number;
       estimated_cost_usd: number;
       created_at: string;
+      metadata?: Record<string, unknown> | null;
     }>;
   }>(`/admin/dashboard/ai-records?page=${page}&limit=${limit}`, {
     headers: adminHeaders(token),
@@ -187,6 +188,7 @@ export function fetchAdminConfig(token: string) {
     openai_model: string;
     openai_embedding_model: string;
     web_origin: string;
+    maintenance_mode: boolean;
     source: Record<string, string>;
     updated_at: string | null;
     config_file: string;
@@ -204,6 +206,7 @@ export function saveAdminConfig(
     openai_model: string;
     openai_embedding_model: string;
     web_origin: string;
+    maintenance_mode: boolean;
   }>,
 ) {
   return httpRequest('/admin/config', {

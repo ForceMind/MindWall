@@ -23,6 +23,23 @@ const aiPage = ref(1);
 const activeInterviewSession = ref('');
 const PAGE_SIZE = 15;
 
+const FEATURE_LABELS: Record<string, string> = {
+  'simulation.reply': 'AI 对话回复',
+  'simulation.persona': 'AI 角色生成',
+  'companion.relay_summary': '消息转述',
+  'companion.tag_refinement': '标签优化',
+  'sandbox.middleware': '沙盒消息改写',
+  'onboarding.input_validation': '输入验证',
+  'onboarding.question': '访谈提问',
+  'onboarding.tag_extraction': '标签提取',
+  'onboarding.embedding': '向量嵌入',
+  'match.reason': '匹配理由',
+};
+
+function featureLabel(code: string) {
+  return FEATURE_LABELS[code] || code;
+}
+
 const paginatedTimeline = computed(() => {
   const all = detail.value?.timeline || [];
   const start = (timelinePage.value - 1) * PAGE_SIZE;
@@ -220,7 +237,7 @@ onMounted(() => {
               <tbody>
                 <tr v-for="row in paginatedAiRecords" :key="row.id">
                   <td>{{ formatTime(row.created_at) }}</td>
-                  <td>{{ row.feature }}</td>
+                  <td>{{ featureLabel(row.feature) }}<br><span style="font-size: 11px; color: var(--text-muted, #999);">{{ row.feature }}</span></td>
                   <td>{{ row.model }}</td>
                   <td>{{ row.total_tokens }}</td>
                   <td>{{ row.estimated_cost_usd }}</td>

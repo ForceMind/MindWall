@@ -145,7 +145,7 @@ const bubbleMessages = computed<BubbleMessage[]>(() => {
     return {
       id: m.id,
       text: hasRelay ? m.relay_text! : m.ai_rewritten_text,
-      originalText: m.original_text && m.original_text !== m.ai_rewritten_text ? m.original_text : undefined,
+      originalText: hasRelay ? m.ai_rewritten_text : undefined,
       mine: isMine,
       kind: hasRelay ? 'ai-relay' as const : 'text' as const,
       senderName: m.sender_name,
@@ -287,10 +287,9 @@ onMounted(() => {
         >
           <div style="font-size: 11px; font-weight: 700; margin-bottom: 4px; opacity: 0.6">{{ item.senderName }}</div>
           <div>{{ item.text }}</div>
-          <div v-if="item.kind === 'ai-relay' && item.mine && item.originalText" class="original-text">
+          <div v-if="item.kind === 'ai-relay' && item.originalText" class="original-text">
             <span class="original-label">原文：</span>{{ item.originalText }}
           </div>
-          <div v-if="item.kind === 'ai-relay' && !item.mine" class="original-text"><span class="original-label">来自 AI 转述</span></div>
           <div v-if="item.aiAction" style="font-size: 10px; color: var(--accent-cool); margin-top: 2px">AI: {{ item.aiAction === 'passed' ? '通过' : item.aiAction === 'modified' ? '改写' : item.aiAction === 'blocked' ? '拦截' : item.aiAction }}</div>
           <div class="bubble-meta">{{ formatTime(item.time) }}</div>
         </div>

@@ -7,6 +7,7 @@ export interface RuntimeConfig {
   openai_input_price?: number;
   openai_output_price?: number;
   web_origin?: string;
+  maintenance_mode?: boolean;
   updated_at?: string;
 }
 

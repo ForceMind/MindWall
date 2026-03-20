@@ -8,6 +8,23 @@ import { useAdminSessionStore } from '@/stores/admin-session';
 
 const adminStore = useAdminSessionStore();
 
+const FEATURE_LABELS: Record<string, string> = {
+  'simulation.reply': 'AI 对话回复',
+  'simulation.persona': 'AI 角色生成',
+  'companion.relay_summary': '消息转述',
+  'companion.tag_refinement': '标签优化',
+  'sandbox.middleware': '沙盒消息改写',
+  'onboarding.input_validation': '输入验证',
+  'onboarding.question': '访谈提问',
+  'onboarding.tag_extraction': '标签提取',
+  'onboarding.embedding': '向量嵌入',
+  'match.reason': '匹配理由',
+};
+
+function featureLabel(code: string) {
+  return FEATURE_LABELS[code] || code;
+}
+
 function createEmptySummary() {
   return {
     total_input_tokens: 0,
@@ -147,7 +164,7 @@ onMounted(() => {
               <tr v-for="row in records" :key="row.id">
                 <td>{{ formatTime(row.created_at) }}</td>
                 <td>{{ row.user_id || '-' }}</td>
-                <td>{{ row.feature }}</td>
+                <td>{{ featureLabel(row.feature) }}<br><span style="font-size: 11px; color: var(--text-muted, #999);">{{ row.feature }}</span></td>
                 <td>{{ row.model }}</td>
                 <td>{{ row.total_tokens }}</td>
                 <td>{{ formatUsd(row.estimated_cost_usd) }}</td>
