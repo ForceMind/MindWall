@@ -30,6 +30,7 @@ export class ContactsService {
         profile: {
           select: {
             city: true,
+            gender: true,
           },
         },
         tags: {
@@ -46,10 +47,11 @@ export class ContactsService {
     }
 
     const city = me.profile?.city?.trim();
+    const userGender = me.profile?.gender?.trim() || null;
     if (!city) {
       return {
         city_scope: null,
-        candidates: await this.buildDiscoveryAiCandidates(me.tags, null, userId),
+        candidates: await this.buildDiscoveryAiCandidates(me.tags, null, userId, userGender),
         ai_chat_candidates: await this.buildAiChatCandidates(userId, null),
       };
     }
@@ -168,7 +170,7 @@ export class ContactsService {
 
     return {
       city_scope: city,
-      candidates: [...candidates, ...await this.buildDiscoveryAiCandidates(me.tags, city, userId)],
+      candidates: [...candidates, ...await this.buildDiscoveryAiCandidates(me.tags, city, userId, userGender)],
       ai_chat_candidates: await this.buildAiChatCandidates(userId, city),
     };
   }
@@ -422,6 +424,7 @@ export class ContactsService {
     selfTags: Array<{ tag_name: string; weight: number }>,
     city?: string | null,
     userId?: string,
+    userGender?: string | null,
   ) {
     const seedTags = selfTags
       .sort((a, b) => b.weight - a.weight)
@@ -432,14 +435,43 @@ export class ContactsService {
     const rotationSeed = Math.floor(Date.now() / (4 * 3600000));
     const userSeed = this.hashSeed(userId || 'default');
     const nonPsych = PRESET_PERSONAS.filter(p => p.id !== 'ai_psychologist');
-    const shuffled = [...nonPsych].sort((a, b) => {
-      const ha = this.hashSeed(a.id + userId + rotationSeed);
-      const hb = this.hashSeed(b.id + userId + rotationSeed);
-      return ha - hb;
-    });
+
+    // Gender-based selection: more opposite-gender, at least 1 same-gender
+    const oppositeGender = userGender === 'female' ? 'male' : 'female';
+    const sameGender = userGender === 'female' ? 'female' : 'male';
+    const oppositePool = nonPsych.filter(p => p.gender === oppositeGender);
+    const samePool = nonPsych.filter(p => p.gender === sameGender);
+
+    const shuffleWithSeed = (arr: typeof nonPsych) =>
+      [...arr].sort((a, b) => {
+        const ha = this.hashSeed(a.id + userId + rotationSeed);
+        const hb = this.hashSeed(b.id + userId + rotationSeed);
+        return ha - hb;
+      });
+
+    const shuffledOpposite = shuffleWithSeed(oppositePool);
+    const shuffledSame = shuffleWithSeed(samePool);
+
     // 1-3 AI fake users that blend in with real users, rotates every 4 hours
     const aiCount = (this.hashSeed(`${userId}:disc:${rotationSeed}`) % 3) + 1;
-    const aiCandidates = shuffled.slice(0, aiCount);
+
+    let aiCandidates: typeof nonPsych;
+    if (!userGender || userGender === 'nonbinary' || userGender === 'other') {
+      // No gender preference: shuffle all equally
+      const shuffled = shuffleWithSeed(nonPsych);
+      aiCandidates = shuffled.slice(0, aiCount);
+    } else {
+      // Guarantee at least 1 same-gender, rest opposite-gender
+      aiCandidates = [];
+      if (aiCount >= 2) {
+        // Pick (aiCount - 1) opposite + 1 same
+        aiCandidates.push(...shuffledOpposite.slice(0, aiCount - 1));
+        aiCandidates.push(shuffledSame[0]);
+      } else {
+        // Only 1 slot: alternate by rotation seed
+        aiCandidates.push(rotationSeed % 3 === 0 ? shuffledSame[0] : shuffledOpposite[0]);
+      }
+    }
 
     const psychologist = PRESET_PERSONAS.find(p => p.id === 'ai_psychologist');
 
