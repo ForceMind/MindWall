@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
         <p v-if="!done && !analyzing" class="panel-subtitle">回答越真实，匹配越准确。系统会根据你的表达生成公开标签与隐藏画像。</p>
       </header>
 
-      <div ref="chatBoxRef" class="message-list" :style="(analyzing || done) ? 'padding: 0 16px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;' : 'padding: 0 16px 10px'">
+      <div ref="chatBoxRef" class="message-list" :class="{ 'interview-center': analyzing || done }" :style="(analyzing || done) ? 'padding: 0 16px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;' : 'padding: 0 16px 10px'">
         <template v-if="turnsCollapsed && !done">
           <div class="bubble system" style="text-align: center; opacity: 0.6">
             访谈已完成（共 {{ turns.filter(t => t.role === 'user').length }} 轮对话）
@@ -271,10 +271,27 @@ onBeforeUnmount(() => {
         <div v-if="inputWarning" class="bubble system" style="color: #c44d1a; border-color: rgba(240, 160, 48, 0.4); background: rgba(240, 160, 48, 0.12)">
           ⚠ {{ inputWarning }}
         </div>
+
+        <div v-if="done" class="column" style="width: 100%; max-width: 400px;">
+          <div class="panel" style="box-shadow: none">
+            <div class="panel-body" style="padding: 12px">
+              <strong>访谈摘要</strong>
+              <p class="panel-subtitle" style="margin-top: 8px">{{ summary }}</p>
+              <div class="tag-list" style="margin-top: 10px">
+                <span v-for="tag in tags" :key="tag.tag_name" class="tag">{{ tag.tag_name }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row-wrap">
+            <button class="btn btn-ghost" type="button" @click="bootstrapSession">重新访谈</button>
+            <button class="btn btn-primary" type="button" @click="goCityStep">下一步：选择城市</button>
+          </div>
+        </div>
       </div>
 
-      <footer class="panel-body" style="padding-top: 8px">
-        <div v-if="!done && !analyzing" class="composer">
+      <footer v-if="!done && !analyzing" class="panel-body" style="padding-top: 8px">
+        <div class="composer">
           <textarea
             v-model="answer"
             class="textarea"
@@ -291,29 +308,15 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-
-        <div v-else class="column">
-          <div class="panel" style="box-shadow: none">
-            <div class="panel-body" style="padding: 12px">
-              <strong>访谈摘要</strong>
-              <p class="panel-subtitle" style="margin-top: 8px">{{ summary }}</p>
-              <div class="tag-list" style="margin-top: 10px">
-                <span v-for="tag in tags" :key="tag.tag_name" class="tag">{{ tag.tag_name }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="row-wrap">
-            <button class="btn btn-ghost" type="button" @click="bootstrapSession">重新访谈</button>
-            <button class="btn btn-primary" type="button" @click="goCityStep">下一步：选择城市</button>
-          </div>
-        </div>
       </footer>
     </section>
   </UserShell>
 </template>
 
 <style scoped>
+.interview-center::before {
+  display: none;
+}
 .loading-dots span {
   display: inline-block;
   font-size: 28px;

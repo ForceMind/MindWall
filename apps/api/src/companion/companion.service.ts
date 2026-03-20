@@ -867,83 +867,79 @@ export class CompanionService {
       const warm = resonanceScore >= 70;
       const toneHint = warm ? '语气可以略带亲切感' : '语气保持中立自然';
 
-      const response = await fetch(
-        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
+      const systemContent = [
+        '你是匿名社交平台的消息转述助手。你的任务是将一条消息转述为第三人称描述。',
+        '转述规则：',
+        '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果消息问"去哪里"，转述必须体现"去哪里"；如果消息聊"咖啡"，转述必须提到"咖啡"。绝对不能把一个话题替换成另一个话题。',
+        '2. 只转述当前这一条消息，不要加入任何其他上下文或猜测。',
+        '3. 转述 8-20 个字，简洁有信息量。',
+        `4. ${toneHint}`,
+        '5. 严格只返回纯文本转述结果，不加 JSON、markdown 或引号。',
+        '',
+        '示例：',
+        '消息"你平时都喜欢做什么？" → 你问了对方平时的兴趣爱好',
+        '消息"去哪里喝咖啡" → 你问了对方去哪喝咖啡',
+        '消息"我最近在学吉他，感觉挺有意思的" → 对方聊了最近在学吉他，觉得很有意思',
+        '消息"我对你很好奇" → 你表达了对对方的好奇',
+        '消息"你好" → 你向对方打了个招呼',
+        '消息"早啊，快进来坐" → 对方向你问好，热情欢迎你',
+      ].join('\n');
+
+      // 分两次独立调用，避免 sender 和 relay 内容互相混淆
+      const makeRelayCall = async (text: string, perspective: 'sender' | 'relay') => {
+        const prefix = perspective === 'sender' ? '用"你"开头描述（你做了什么）' : '用"对方"开头描述（对方说了什么）';
+        const resp = await fetch(
+          this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: aiConfig.openaiModel,
+              temperature: 0.3,
+              messages: [
+                { role: 'system', content: systemContent },
+                { role: 'user', content: `请转述这条消息，${prefix}：\n"${text.slice(0, 200)}"` },
+              ],
+            }),
           },
-          body: JSON.stringify({
+        );
+        if (!resp.ok) return null;
+        const payload = (await resp.json()) as any;
+        const content = payload.choices?.[0]?.message?.content?.trim();
+        if (content) {
+          await this.aiUsageService.logGeneration({
+            userId,
+            feature: `companion.relay_${perspective}`,
+            promptKey: `companion.relay_${perspective}`,
+            provider: 'openai',
             model: aiConfig.openaiModel,
-            temperature: 0.3,
-            messages: [
-              {
-                role: 'system',
-                content: [
-                  '你是匿名社交平台的消息转述助手。用户之间的消息需要经过你的转述后展示。',
-                  '转述规则：',
-                  '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果用户问"去哪里"，转述必须体现"去哪里"；如果用户聊"咖啡"，转述必须提到"咖啡"。绝对不能把一个话题替换成另一个话题。',
-                  '2. sender 和 relay 必须各自独立转述，sender 只描述用户消息的内容，relay 只描述对方回复的内容，不得互相混淆。',
-                  '3. sender 字段用"你"开头（描述发送者做了什么），relay 字段用"对方"开头（描述对方说了什么）',
-                  '4. 每条转述 8-20 个字，简洁有信息量',
-                  `5. ${toneHint}`,
-                  '6. 严格只返回纯 JSON，不加任何 markdown 标记',
-                  '',
-                  '正确示例：',
-                  '用户说"你平时都喜欢做什么？" → sender:"你问了对方平时的兴趣爱好"',
-                  '用户说"去哪里喝咖啡" → sender:"你问了对方去哪喝咖啡"（保留"咖啡"和"去哪"两个关键信息）',
-                  '对方说"我最近在学吉他，感觉挺有意思的" → relay:"对方聊了最近在学的新东西，觉得很有意思"',
-                  '用户说"我对你很好奇" → sender:"你表达了对对方的好奇"',
-                  '',
-                  '错误示例（绝对不能这样做）：',
-                  '用户说"去哪里喝咖啡" → sender:"你询问对方今天有什么开心事" ← 错误！话题被篡改了',
-                  '用户说"你好" → sender:"你…" ← 错误！太短且无意义',
-                ].join('\n'),
-              },
-              {
-                role: 'user',
-                content: `用户发送的消息："${userMessage.slice(0, 200)}"\n对方的回复："${aiReply.slice(0, 200)}"\n\n请用自然语言转述以上内容，输出JSON格式：{"sender":"你向对方做了什么（8-20字描述）","relay":"对方向你说了什么（8-20字描述）"}`,
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) return fallback;
+            inputTokens: payload.usage?.prompt_tokens || 0,
+            outputTokens: payload.usage?.completion_tokens || 0,
+            totalTokens: payload.usage?.total_tokens || 0,
+            metadata: {
+              prompt: { text: text.slice(0, 200), perspective },
+              response: content,
+            },
+          });
+        }
+        return content || null;
+      };
 
-      const payload = (await response.json()) as any;
-      const content = payload.choices?.[0]?.message?.content?.trim();
-      if (!content) return fallback;
-
-      const cleaned = content.replace(/```json?\n?|\n?```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      const sender = typeof parsed.sender === 'string' ? parsed.sender.trim() : '';
-      const relay = typeof parsed.relay === 'string' ? parsed.relay.trim() : '';
+      const [senderResult, relayResult] = await Promise.all([
+        makeRelayCall(userMessage, 'sender'),
+        makeRelayCall(aiReply, 'relay'),
+      ]);
 
       // Reject outputs that are too short or look like copied placeholders
       const isPlaceholder = (s: string) =>
         !s || s.length < 5 || /^(你|对方)\.{2,}$/.test(s) || /^(你|对方)(…+|\.\.\.)$/.test(s);
-      if (isPlaceholder(sender) || isPlaceholder(relay)) return fallback;
-
-      await this.aiUsageService.logGeneration({
-        userId,
-        feature: 'companion.relay_summary',
-        promptKey: 'companion.relay_summary',
-        provider: 'openai',
-        model: aiConfig.openaiModel,
-        inputTokens: payload.usage?.prompt_tokens || 0,
-        outputTokens: payload.usage?.completion_tokens || 0,
-        totalTokens: payload.usage?.total_tokens || 0,
-        metadata: {
-          prompt: { userMessage: userMessage.slice(0, 200), aiReply: aiReply.slice(0, 200) },
-          response: content,
-        },
-      });
 
       return {
-        senderSummary: sender || fallback.senderSummary,
-        replyRelay: relay || fallback.replyRelay,
+        senderSummary: (senderResult && !isPlaceholder(senderResult)) ? senderResult : fallback.senderSummary,
+        replyRelay: (relayResult && !isPlaceholder(relayResult)) ? relayResult : fallback.replyRelay,
       };
     } catch (err) {
       this.logger.warn(`Relay text generation failed: ${(err as Error).message}`);
