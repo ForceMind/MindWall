@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
         <p v-if="!done && !analyzing" class="panel-subtitle">回答越真实，匹配越准确。系统会根据你的表达生成公开标签与隐藏画像。</p>
       </header>
 
-      <div ref="chatBoxRef" class="message-list" style="padding: 0 16px 10px">
+      <div ref="chatBoxRef" class="message-list" :style="(analyzing || done) ? 'padding: 0 16px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;' : 'padding: 0 16px 10px'">
         <template v-if="turnsCollapsed && !done">
           <div class="bubble system" style="text-align: center; opacity: 0.6">
             访谈已完成（共 {{ turns.filter(t => t.role === 'user').length }} 轮对话）
