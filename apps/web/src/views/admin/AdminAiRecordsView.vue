@@ -11,7 +11,8 @@ const adminStore = useAdminSessionStore();
 const FEATURE_LABELS: Record<string, string> = {
   'simulation.reply': 'AI 对话回复',
   'simulation.persona': 'AI 角色生成',
-  'companion.relay_summary': '消息转述',
+  'companion.relay_sender': '用户消息转述',
+  'companion.relay_reply': 'AI 回复转述',
   'companion.tag_refinement': '标签优化',
   'sandbox.middleware': '沙盒消息改写',
   'onboarding.input_validation': '输入验证',

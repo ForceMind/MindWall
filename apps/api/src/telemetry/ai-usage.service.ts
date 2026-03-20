@@ -16,14 +16,19 @@ type UsageInput = {
 
 @Injectable()
 export class AiUsageService {
+  /** 每 1K token 的人民币价格 */
   private readonly pricingPer1K: Record<
     string,
-    { inputUsd: number; outputUsd: number }
+    { inputRmb: number; outputRmb: number }
   > = {
-    'gpt-4.1-mini': { inputUsd: 0.0004, outputUsd: 0.0016 },
-    'gpt-4.1': { inputUsd: 0.005, outputUsd: 0.015 },
-    'text-embedding-3-small': { inputUsd: 0.00002, outputUsd: 0 },
-    'text-embedding-3-large': { inputUsd: 0.00013, outputUsd: 0 },
+    // 讯飞星火 MaaS
+    'xop3qwen1b7': { inputRmb: 0.001, outputRmb: 0.001 },
+    'xop3qwen8bembedding': { inputRmb: 0.001, outputRmb: 0 },
+    // OpenAI fallback (按汇率约 7.2 折算)
+    'gpt-4.1-mini': { inputRmb: 0.003, outputRmb: 0.012 },
+    'gpt-4.1': { inputRmb: 0.036, outputRmb: 0.108 },
+    'text-embedding-3-small': { inputRmb: 0.00015, outputRmb: 0 },
+    'text-embedding-3-large': { inputRmb: 0.001, outputRmb: 0 },
   };
 
   constructor(private readonly prisma: PrismaService) {}
@@ -164,9 +169,9 @@ export class AiUsageService {
   }
 
   private estimateCost(model: string, inputTokens: number, outputTokens: number) {
-    const price = this.pricingPer1K[model] || { inputUsd: 0.0006, outputUsd: 0.002 };
-    const inputCost = (inputTokens / 1000) * price.inputUsd;
-    const outputCost = (outputTokens / 1000) * price.outputUsd;
+    const price = this.pricingPer1K[model] || { inputRmb: 0.001, outputRmb: 0.001 };
+    const inputCost = (inputTokens / 1000) * price.inputRmb;
+    const outputCost = (outputTokens / 1000) * price.outputRmb;
     return inputCost + outputCost;
   }
 }

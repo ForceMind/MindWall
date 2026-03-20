@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AdminShell from '@/components/AdminShell.vue';
 import {
@@ -218,11 +218,44 @@ async function loadCompanionMessages() {
   }
 }
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+async function silentRefreshCompanion() {
+  if (!adminStore.token) return;
+  try {
+    const payload = await fetchAdminCompanionSessionMessages(adminStore.token, sessionId.value);
+    if (payload.messages.length !== companionMessages.value.length) {
+      companionMessages.value = payload.messages;
+      companionInfo.value = payload.session;
+    }
+  } catch { /* silent */ }
+}
+
+async function silentRefreshMatch() {
+  if (!adminStore.token) return;
+  try {
+    const payload = await fetchAdminMatchMessages(adminStore.token, sessionId.value, matchPage.value, matchLimit);
+    if (payload.messages.length !== matchMessages.value.length) {
+      matchMessages.value = payload.messages;
+      matchTotal.value = payload.total;
+    }
+  } catch { /* silent */ }
+}
+
 onMounted(() => {
   if (chatType.value === 'match') {
     loadMatchMessages();
+    refreshTimer = setInterval(silentRefreshMatch, 8000);
   } else {
     loadCompanionMessages();
+    refreshTimer = setInterval(silentRefreshCompanion, 8000);
+  }
+});
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 });
 </script>

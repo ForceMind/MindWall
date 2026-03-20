@@ -713,11 +713,17 @@ export class SandboxService {
     };
   }
 
+  private static readonly PROFANITY_RE = /草泥马|操你|fuck|shit|傻[逼比]|脑残|智障|废物|去死|你妈|滚蛋|狗[日逼比]|妈[的逼比]|牛逼|尼玛|cnm|nmsl|sb|煞笔/i;
+
   /** 中性动作描述（不带主语），代码层加 "你"/"对方" 前缀 */
   private summarizeNeutral(text: string, resonanceScore: number = 0) {
     const warm = resonanceScore >= 70;
     const nearWall = resonanceScore >= 85;
 
+    // Profanity → compress to neutral description, never expose original
+    if (SandboxService.PROFANITY_RE.test(text)) {
+      return '说了不太友好的话';
+    }
     if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
       return warm ? '热情地打了个招呼' : '打了个招呼';
     }
@@ -727,6 +733,12 @@ export class SandboxService {
     if (/^(再见|拜拜|bye)/i.test(text)) {
       return '道了别';
     }
+    // Short message patterns — detect common phrases before falling through
+    if (/^(哈|呵|嘿|嘻|hiahia|233)+$/i.test(text)) return '笑了一下';
+    if (/^(好的?|嗯+|行|ok|可以|没问题|对|是的?)$/i.test(text)) return '表示同意';
+    if (/^(啊|哦|噢|额|emmm?|嗯?)+$/i.test(text)) return '回应了一声';
+    if (/^(加油|冲|奥利给|666|厉害|牛|棒|太强了)+$/i.test(text)) return '表达了鼓励';
+    if (/^(晚安|早安?|早上好|午安)+$/i.test(text)) return warm ? '温馨地问了好' : '打了个招呼';
     const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
     if (isQuestion) {
       if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {

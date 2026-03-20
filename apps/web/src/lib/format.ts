@@ -74,5 +74,5 @@ export function formatDateTime(value: string | number | Date | null | undefined)
 
 export function formatUsd(value: number | null | undefined) {
   const numeric = Number(value || 0);
-  return `$${numeric.toFixed(6)}`;
+  return `¥${numeric.toFixed(6)}`;
 }
