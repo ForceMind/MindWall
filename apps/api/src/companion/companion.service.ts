@@ -74,13 +74,16 @@ export class CompanionService {
         const isUser = m.sender_type === 'user';
         const rawText = m.original_text || m.ai_rewritten_text;
         const storedRelay = (m as any).relay_text as string | null;
+        // relay_text stores neutral description (no subject prefix)
+        // Code adds perspective: user's own msg → "你...", other's msg → "对方..."
+        const neutralRelay = storedRelay || (wallBroken ? null : this.summarizeNeutral(rawText, resonanceScore));
         return {
           id: m.id,
           role: m.sender_type,
           text: m.ai_rewritten_text,
           original_text: isUser ? m.original_text : undefined,
-          relay_text: wallBroken ? undefined : (storedRelay || this.summarizeForRelay(rawText, resonanceScore)),
-          sender_summary: (isUser && !wallBroken) ? (storedRelay || this.summarizeForSender(rawText, resonanceScore)) : undefined,
+          relay_text: (wallBroken || !neutralRelay) ? undefined : this.addRelayPerspective(neutralRelay, 'peer'),
+          sender_summary: (isUser && !wallBroken && neutralRelay) ? this.addRelayPerspective(neutralRelay, 'self') : undefined,
           created_at: m.created_at,
         };
       })
@@ -346,23 +349,23 @@ export class CompanionService {
       const wallBroken = isChatPool || resonanceScore >= 100;
       const inSandbox = !wallBroken;
 
-      // Generate relay texts (AI-powered when possible)
-      let senderSummary: string | undefined;
+      // Generate relay texts (AI-powered when possible) — neutral descriptions
+      let senderRelay: string | undefined;
       let replyRelay: string | undefined;
       if (inSandbox) {
         const relayResult = await this.generateRelayTexts(userId, lastUserMessage, reply, resonanceScore);
-        senderSummary = relayResult.senderSummary;
+        senderRelay = relayResult.senderRelay;
         replyRelay = relayResult.replyRelay;
       }
 
-      // Save assistant message with relay_text
+      // Save assistant message with relay_text (neutral, no prefix)
       await this.prisma.companionMessage.create({
         data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply, relay_text: replyRelay }
       });
-      // Update user message with relay_text
+      // Update user message with relay_text (neutral, no prefix)
       const lastUserMsgId = (companionSession as any).__lastUserMsgId;
-      if (lastUserMsgId && senderSummary) {
-        await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderSummary } });
+      if (lastUserMsgId && senderRelay) {
+        await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderRelay } });
       }
       await this.prisma.companionSession.update({
         where: { id: companionSession.id },
@@ -375,8 +378,8 @@ export class CompanionService {
         contact_id: persona.id,
         contact_name: persona.name,
         reply,
-        sender_summary: senderSummary,
-        reply_relay: replyRelay,
+        sender_summary: senderRelay ? this.addRelayPerspective(senderRelay, 'self') : undefined,
+        reply_relay: replyRelay ? this.addRelayPerspective(replyRelay, 'peer') : undefined,
         resonance_score: resonanceScore,
         wall_ready: !wallBroken && resonanceScore >= 85,
         wall_broken: wallBroken,
@@ -422,23 +425,23 @@ export class CompanionService {
     const wallBroken = isPsychologist || isChatPool || resonanceScore >= 100;
     const inSandbox = !wallBroken;
 
-    // Generate relay texts (AI-powered when possible)
-    let senderSummary: string | undefined;
+    // Generate relay texts (AI-powered when possible) — neutral descriptions
+    let senderRelay: string | undefined;
     let replyRelay: string | undefined;
     if (inSandbox) {
       const relayResult = await this.generateRelayTexts(userId, lastUserMessage, reply, resonanceScore);
-      senderSummary = relayResult.senderSummary;
+      senderRelay = relayResult.senderRelay;
       replyRelay = relayResult.replyRelay;
     }
 
-    // Save assistant reply with relay_text
+    // Save assistant reply with relay_text (neutral, no prefix)
     await this.prisma.companionMessage.create({
       data: { session_id: companionSession.id, sender_type: 'assistant', original_text: reply, ai_rewritten_text: reply, relay_text: replyRelay }
     });
-    // Update user message with relay_text
+    // Update user message with relay_text (neutral, no prefix)
     const lastUserMsgId = (companionSession as any).__lastUserMsgId;
-    if (lastUserMsgId && senderSummary) {
-      await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderSummary } });
+    if (lastUserMsgId && senderRelay) {
+      await this.prisma.companionMessage.update({ where: { id: lastUserMsgId }, data: { relay_text: senderRelay } });
     }
     await this.prisma.companionSession.update({
       where: { id: companionSession.id },
@@ -458,8 +461,8 @@ export class CompanionService {
       contact_id: persona.id,
       contact_name: persona.name,
       reply,
-      sender_summary: senderSummary,
-      reply_relay: replyRelay,
+      sender_summary: senderRelay ? this.addRelayPerspective(senderRelay, 'self') : undefined,
+      reply_relay: replyRelay ? this.addRelayPerspective(replyRelay, 'peer') : undefined,
       resonance_score: resonanceScore,
       wall_ready: !wallBroken && resonanceScore >= 85,
       wall_broken: wallBroken,
@@ -854,10 +857,10 @@ export class CompanionService {
     userMessage: string,
     aiReply: string,
     resonanceScore: number,
-  ): Promise<{ senderSummary: string; replyRelay: string }> {
+  ): Promise<{ senderRelay: string; replyRelay: string }> {
     const fallback = {
-      senderSummary: this.summarizeForSender(userMessage, resonanceScore),
-      replyRelay: this.summarizeForRelay(aiReply, resonanceScore),
+      senderRelay: this.summarizeNeutral(userMessage, resonanceScore),
+      replyRelay: this.summarizeNeutral(aiReply, resonanceScore),
     };
     try {
       const aiConfig = await this.adminConfigService.getAiConfig();
@@ -868,26 +871,31 @@ export class CompanionService {
       const toneHint = warm ? '语气可以略带亲切感' : '语气保持中立自然';
 
       const systemContent = [
-        '你是匿名社交平台的消息转述助手。你的任务是将一条消息转述为第三人称描述。',
+        '你是匿名社交平台的消息转述助手。你的任务是将一条消息转述为中性的动作描述。',
         '转述规则：',
-        '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果消息问"去哪里"，转述必须体现"去哪里"；如果消息聊"咖啡"，转述必须提到"咖啡"。绝对不能把一个话题替换成另一个话题。',
-        '2. 只转述当前这一条消息，不要加入任何其他上下文或猜测。',
-        '3. 转述 8-20 个字，简洁有信息量。',
-        `4. ${toneHint}`,
-        '5. 严格只返回纯文本转述结果，不加 JSON、markdown 或引号。',
+        '1. 【最重要】必须准确保留原消息的具体话题和核心意图。如果消息问"去哪里"，转述必须体现"去哪里"；如果消息聊"咖啡"，转述必须提到"咖啡"。',
+        '2. 只转述当前这一条消息，不要加入额外上下文。',
+        '3. 输出中性动作描述，不要加主语（不要以"你""对方""他/她"开头），直接描述动作。',
+        '4. 转述 6-18 个字，简洁有信息量。',
+        `5. ${toneHint}`,
+        '6. 严格只返回纯文本，不加 JSON、markdown 或引号。',
         '',
-        '示例：',
-        '消息"你平时都喜欢做什么？" → 你问了对方平时的兴趣爱好',
-        '消息"去哪里喝咖啡" → 你问了对方去哪喝咖啡',
-        '消息"我最近在学吉他，感觉挺有意思的" → 对方聊了最近在学吉他，觉得很有意思',
-        '消息"我对你很好奇" → 你表达了对对方的好奇',
-        '消息"你好" → 你向对方打了个招呼',
-        '消息"早啊，快进来坐" → 对方向你问好，热情欢迎你',
+        '正确示例：',
+        '"你平时都喜欢做什么？" → 询问了平时的兴趣爱好',
+        '"去哪里喝咖啡" → 问了去哪喝咖啡',
+        '"我最近在学吉他，感觉挺有意思的" → 聊了最近在学吉他，觉得很有意思',
+        '"我对你很好奇" → 表达了好奇',
+        '"你好" → 打了个招呼',
+        '"早啊，快进来坐" → 热情问好，邀请进来坐',
+        '"哈哈 不会累的" → 表示不会累',
+        '"这两个能一起吃吗？" → 问了两样东西能否一起吃',
+        '',
+        '错误示例（不要这样写）：',
+        '"你好" → "你打了个招呼" ← 错误！不要加主语"你"',
+        '"你好" → "对方打了招呼" ← 错误！不要加主语"对方"',
       ].join('\n');
 
-      // 分两次独立调用，避免 sender 和 relay 内容互相混淆
-      const makeRelayCall = async (text: string, perspective: 'sender' | 'relay') => {
-        const prefix = perspective === 'sender' ? '用"你"开头描述（你做了什么）' : '用"对方"开头描述（对方说了什么）';
+      const makeRelayCall = async (text: string, label: string) => {
         const resp = await fetch(
           this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
           {
@@ -901,7 +909,7 @@ export class CompanionService {
               temperature: 0.3,
               messages: [
                 { role: 'system', content: systemContent },
-                { role: 'user', content: `请转述这条消息，${prefix}：\n"${text.slice(0, 200)}"` },
+                { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
               ],
             }),
           },
@@ -912,34 +920,31 @@ export class CompanionService {
         if (content) {
           await this.aiUsageService.logGeneration({
             userId,
-            feature: `companion.relay_${perspective}`,
-            promptKey: `companion.relay_${perspective}`,
+            feature: `companion.relay_${label}`,
+            promptKey: `companion.relay_${label}`,
             provider: 'openai',
             model: aiConfig.openaiModel,
             inputTokens: payload.usage?.prompt_tokens || 0,
             outputTokens: payload.usage?.completion_tokens || 0,
             totalTokens: payload.usage?.total_tokens || 0,
-            metadata: {
-              prompt: { text: text.slice(0, 200), perspective },
-              response: content,
-            },
+            metadata: { prompt: text.slice(0, 200), response: content },
           });
         }
-        return content || null;
+        // Strip leading subject if AI still adds one
+        return content ? content.replace(/^(你|对方|他|她)\s*/, '') : null;
       };
 
-      const [senderResult, relayResult] = await Promise.all([
+      const [senderResult, replyResult] = await Promise.all([
         makeRelayCall(userMessage, 'sender'),
-        makeRelayCall(aiReply, 'relay'),
+        makeRelayCall(aiReply, 'reply'),
       ]);
 
-      // Reject outputs that are too short or look like copied placeholders
       const isPlaceholder = (s: string) =>
-        !s || s.length < 5 || /^(你|对方)\.{2,}$/.test(s) || /^(你|对方)(…+|\.\.\.)$/.test(s);
+        !s || s.length < 3 || /^\.{2,}$/.test(s) || /^(…+|\.\.\.)$/.test(s);
 
       return {
-        senderSummary: (senderResult && !isPlaceholder(senderResult)) ? senderResult : fallback.senderSummary,
-        replyRelay: (relayResult && !isPlaceholder(relayResult)) ? relayResult : fallback.replyRelay,
+        senderRelay: (senderResult && !isPlaceholder(senderResult)) ? senderResult : fallback.senderRelay,
+        replyRelay: (replyResult && !isPlaceholder(replyResult)) ? replyResult : fallback.replyRelay,
       };
     } catch (err) {
       this.logger.warn(`Relay text generation failed: ${(err as Error).message}`);
@@ -1065,80 +1070,52 @@ export class CompanionService {
     }
   }
 
-  private summarizeForRelay(text: string, resonanceScore: number = 0): string {
+  /**
+   * 中性动作描述（不带主语），用于代码层加前缀区分视角
+   * 发送者看到: "你" + neutral  →  "你打了个招呼"
+   * 接收者看到: "对方" + neutral →  "对方打了个招呼"
+   */
+  private summarizeNeutral(text: string, resonanceScore: number = 0): string {
     const warm = resonanceScore >= 70;
     const nearWall = resonanceScore >= 85;
     if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
-      return warm ? '对方热情地和你打了招呼' : '对方向你打招呼';
+      return warm ? '热情地打了个招呼' : '打了个招呼';
     }
     if (/^(谢|感谢|多谢)/.test(text)) {
-      return warm ? '对方真诚地向你表达了谢意' : '对方表达了感谢';
+      return warm ? '真诚地表达了谢意' : '表达了感谢';
     }
-    if (/^(再见|拜拜|bye)/i.test(text)) return '对方向你道别';
+    if (/^(再见|拜拜|bye)/i.test(text)) return '道了别';
     const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
     if (isQuestion) {
       if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-        return warm ? '对方关心地询问了你最近的状态' : '对方询问了关于疲惫的话题';
+        return warm ? '关心地询问了最近的状态' : '询问了关于疲惫的话题';
       }
       if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-        return warm ? '对方好奇地问了你开心的事' : '对方询问了一些积极的话题';
+        return warm ? '好奇地问了开心的事' : '询问了一些积极的话题';
       }
       if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-        return warm ? '对方关心地询问了你的心情' : '对方询问了关于心情的话题';
+        return warm ? '关心地询问了心情' : '询问了关于心情的话题';
       }
-      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
+      return warm ? '好奇地提了一个问题' : '提了一个问题';
     }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-      return warm ? '对方和你分享了最近的累和压力，听起来似乎需要人聊聊' : '对方分享了最近的疲惫感受';
+      return warm ? '分享了最近的累和压力' : '分享了最近的疲惫感受';
     }
     if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-      return warm ? '对方很兴奋地分享了一个开心的事' : '对方分享了一些积极的心情';
+      return warm ? '兴奋地分享了一件开心的事' : '分享了一些积极的心情';
     }
     if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-      return warm ? '对方向你吐露了一些低落的情绪，可能是在向你寻求共鸣' : '对方表达了低落的情绪';
+      return warm ? '吐露了一些低落的情绪' : '表达了低落的情绪';
     }
-    if (text.length <= 6) return '对方发来了一条简短消息';
-    if (nearWall) return `对方认真地和你分享了一段想法（约${text.length}字），看起来你们聊得很投入`;
-    if (warm) return `对方和你分享了一段详细的想法（约${text.length}字）`;
-    return `对方分享了一段想法（约${text.length}字）`;
+    if (text.length <= 6) return '发了一条简短消息';
+    if (nearWall) return `认真地分享了一段想法（约${text.length}字）`;
+    if (warm) return `分享了一段详细的想法（约${text.length}字）`;
+    return `分享了一段想法（约${text.length}字）`;
   }
 
-  private summarizeForSender(text: string, resonanceScore: number = 0): string {
-    const warm = resonanceScore >= 70;
-    const nearWall = resonanceScore >= 85;
-    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
-      return warm ? '你热情地向对方打了招呼' : '你向对方问好';
-    }
-    if (/^(谢|感谢|多谢)/.test(text)) {
-      return warm ? '你真诚地向对方表达了谢意' : '你表达了感谢';
-    }
-    if (/^(再见|拜拜|bye)/i.test(text)) return '你向对方道别';
-    const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
-    if (isQuestion) {
-      if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-        return warm ? '你关心地询问了对方最近的状态' : '你询问了对方关于疲惫的话题';
-      }
-      if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-        return warm ? '你好奇地问了对方开心的事' : '你询问了对方一些积极的话题';
-      }
-      if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-        return warm ? '你关心地询问了对方的心情' : '你询问了对方关于心情的话题';
-      }
-      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
-    }
-    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-      return warm ? '你和对方分享了最近的累和压力' : '你分享了最近的疲惫感受';
-    }
-    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-      return warm ? '你兴奋地分享了一个开心的事' : '你分享了一些积极的心情';
-    }
-    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-      return warm ? '你向对方吐露了一些低落的情绪' : '你表达了低落的情绪';
-    }
-    if (text.length <= 6) return '你发了一条简短消息';
-    if (nearWall) return `你认真地分享了一段想法（约${text.length}字）`;
-    if (warm) return `你和对方分享了一段详细的想法（约${text.length}字）`;
-    return `你分享了一段想法（约${text.length}字）`;
+  /** 给中性描述加上视角前缀 */
+  private addRelayPerspective(neutral: string, perspective: 'self' | 'peer'): string {
+    return perspective === 'self' ? `你${neutral}` : `对方${neutral}`;
   }
 
   private buildPersonaAvatar(seed: string, label: string): string {

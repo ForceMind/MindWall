@@ -703,124 +703,62 @@ export class SandboxService {
       };
     }
 
-    const softened = this.summarizeForRelay(normalized, resonanceScore);
-    const senderView = this.summarizeForSender(normalized, resonanceScore);
+    const softened = this.summarizeNeutral(normalized, resonanceScore);
     return {
       aiAction: 'modified',
-      rewrittenText: softened,
-      senderSummary: senderView,
+      rewrittenText: `对方${softened}`,
+      senderSummary: `你${softened}`,
       hiddenTagUpdates: {},
       reason: 'modified: summarized for sandbox relay',
     };
   }
 
-  private summarizeForRelay(text: string, resonanceScore: number = 0) {
-    // At high resonance (>=70), produce warmer and more detailed summaries
-    // to facilitate natural progression toward wall-break
+  /** 中性动作描述（不带主语），代码层加 "你"/"对方" 前缀 */
+  private summarizeNeutral(text: string, resonanceScore: number = 0) {
     const warm = resonanceScore >= 70;
     const nearWall = resonanceScore >= 85;
 
     if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
-      return warm ? '对方热情地和你打了招呼' : '对方向你打招呼';
+      return warm ? '热情地打了个招呼' : '打了个招呼';
     }
     if (/^(谢|感谢|多谢)/.test(text)) {
-      return warm ? '对方真诚地向你表达了谢意' : '对方表达了感谢';
+      return warm ? '真诚地表达了谢意' : '表达了感谢';
     }
     if (/^(再见|拜拜|bye)/i.test(text)) {
-      return '对方向你道别';
+      return '道了别';
     }
-    // Detect questions BEFORE topic/emotion patterns to avoid misclassifying
-    // e.g. "你因为什么疲惫呢" is a question, not sharing fatigue
     const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
     if (isQuestion) {
       if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-        return warm ? '对方关心地询问了你最近的状态' : '对方询问了关于疲惫的话题';
+        return warm ? '关心地询问了最近的状态' : '询问了关于疲惫的话题';
       }
       if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-        return warm ? '对方好奇地问了你开心的事' : '对方询问了一些积极的话题';
+        return warm ? '好奇地问了开心的事' : '询问了一些积极的话题';
       }
       if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-        return warm ? '对方关心地询问了你的心情' : '对方询问了关于心情的话题';
+        return warm ? '关心地询问了心情' : '询问了关于心情的话题';
       }
-      return warm ? '对方很好奇地向你提了一个问题，想更多了解你' : '对方向你提了一个问题';
+      return warm ? '好奇地提了一个问题' : '提了一个问题';
     }
     if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-      return warm
-        ? '对方和你分享了最近的累和压力，听起来似乎需要人聊聊'
-        : '对方分享了最近的疲惫感受';
+      return warm ? '分享了最近的累和压力' : '分享了最近的疲惫感受';
     }
     if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-      return warm ? '对方很兴奋地分享了一个开心的事' : '对方分享了一些积极的心情';
+      return warm ? '兴奋地分享了一件开心的事' : '分享了一些积极的心情';
     }
     if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-      return warm
-        ? '对方向你吐露了一些低落的情绪，可能是在向你寻求共鸣'
-        : '对方表达了低落的情绪';
+      return warm ? '吐露了一些低落的情绪' : '表达了低落的情绪';
     }
     if (text.length <= 6) {
-      return '对方发来了一条简短消息';
+      return '发了一条简短消息';
     }
-
     if (nearWall) {
-      return `对方认真地和你分享了一段想法（约${text.length}字），看起来你们聊得很投入`;
+      return `认真地分享了一段想法（约${text.length}字）`;
     }
     if (warm) {
-      return `对方和你分享了一段详细的想法（约${text.length}字）`;
+      return `分享了一段详细的想法（约${text.length}字）`;
     }
-    return `对方分享了一段想法（约${text.length}字）`;
-  }
-
-  private summarizeForSender(text: string, resonanceScore: number = 0) {
-    const warm = resonanceScore >= 70;
-    const nearWall = resonanceScore >= 85;
-
-    if (/^(你好|嗨|hi|hello|hey)/i.test(text)) {
-      return warm ? '你热情地向对方打了招呼' : '你向对方问好';
-    }
-    if (/^(谢|感谢|多谢)/.test(text)) {
-      return warm ? '你真诚地向对方表达了谢意' : '你表达了感谢';
-    }
-    if (/^(再见|拜拜|bye)/i.test(text)) {
-      return '你向对方道别';
-    }
-    // Detect questions BEFORE topic/emotion patterns
-    const isQuestion = /(\?|？|吗|呢$|什么|哪|谁|怎么|为什么|多少|几个|如何|哪里|吧\?|吧？)/.test(text);
-    if (isQuestion) {
-      if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-        return warm ? '你关心地询问了对方最近的状态' : '你询问了对方关于疲惫的话题';
-      }
-      if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-        return warm ? '你好奇地问了对方开心的事' : '你询问了对方一些积极的话题';
-      }
-      if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-        return warm ? '你关心地询问了对方的心情' : '你询问了对方关于心情的话题';
-      }
-      return warm ? '你好奇地向对方提了一个问题' : '你向对方提了一个问题';
-    }
-    if (/(累|疲惫|辛苦|忙|压力)/.test(text)) {
-      return warm
-        ? '你和对方分享了最近的累和压力'
-        : '你分享了最近的疲惫感受';
-    }
-    if (/(开心|高兴|快乐|不错|棒)/.test(text)) {
-      return warm ? '你兴奋地分享了一个开心的事' : '你分享了一些积极的心情';
-    }
-    if (/(难过|伤心|失落|沮丧|低落)/.test(text)) {
-      return warm
-        ? '你向对方吐露了一些低落的情绪'
-        : '你表达了低落的情绪';
-    }
-    if (text.length <= 6) {
-      return '你发了一条简短消息';
-    }
-
-    if (nearWall) {
-      return `你认真地分享了一段想法（约${text.length}字）`;
-    }
-    if (warm) {
-      return `你和对方分享了一段详细的想法（约${text.length}字）`;
-    }
-    return `你分享了一段想法（约${text.length}字）`;
+    return `分享了一段想法（约${text.length}字）`;
   }
 
   /** Convert receiver-perspective text to sender-perspective (for AI-generated text) */
