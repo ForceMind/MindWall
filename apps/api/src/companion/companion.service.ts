@@ -933,7 +933,13 @@ export class CompanionService {
             inputTokens: payload.usage?.prompt_tokens || 0,
             outputTokens: payload.usage?.completion_tokens || 0,
             totalTokens: payload.usage?.total_tokens || 0,
-            metadata: { prompt: text.slice(0, 200), response: content },
+            metadata: {
+              prompt: [
+                { role: 'system', content: systemContent },
+                { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
+              ],
+              response: content,
+            },
           });
         }
         // Strip leading subject if AI still adds one (Chinese has no space between subject and verb)
@@ -1131,9 +1137,14 @@ export class CompanionService {
     return `分享了一段想法（约${text.length}字）`;
   }
 
-  /** 给中性描述加上视角前缀 */
+  /** 给中性描述加上视角前缀，同时替换内容中的人称代词 */
   private addRelayPerspective(neutral: string, perspective: 'self' | 'peer'): string {
-    return perspective === 'self' ? `你${neutral}` : `对方${neutral}`;
+    if (perspective === 'self') {
+      // 发送者视角：内部的"你"（指对话伙伴）→ "对方"
+      return `你${neutral.replace(/你/g, '对方')}`;
+    }
+    // 接收者视角：内部的"对方"（指接收者自己）→ "你"
+    return `对方${neutral.replace(/对方/g, '你')}`;
   }
 
   private buildPersonaAvatar(seed: string, label: string): string {
