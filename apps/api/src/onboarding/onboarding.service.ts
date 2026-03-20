@@ -1483,85 +1483,116 @@ export class OnboardingService {
     }
 
     const model = aiConfig.openaiModel;
-
-    try {
-      const response = await fetch(
-        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
+    const url = this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl);
+    const reqBody = JSON.stringify({
+      model,
+      temperature: options.temperature ?? 0.45,
+      response_format: { type: 'json_object' },
+      messages: [
         {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          role: 'system',
+          content:
+            'You are a strict JSON generator. Output only one JSON object and nothing else.',
         },
-        body: JSON.stringify({
-          model,
-          temperature: options.temperature ?? 0.45,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are a strict JSON generator. Output only one JSON object and nothing else.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-        }),
+        {
+          role: 'user',
+          content: prompt,
         },
-      );
+      ],
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    };
 
-      if (!response.ok) {
-        const detail = await response.text();
-        this.logger.warn(`OpenAI request failed: ${response.status} ${detail}`);
-        return null;
-      }
+    // Retry once on 5xx (XunFei intermittent engine errors)
+    let lastStatus = 0;
+    let lastDetail = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(url, { method: 'POST', headers, body: reqBody });
 
-      const payload = (await response.json()) as {
-        usage?: {
-          prompt_tokens?: number;
-          completion_tokens?: number;
-          total_tokens?: number;
+        if (!response.ok) {
+          lastStatus = response.status;
+          lastDetail = await response.text().catch(() => '');
+          if (response.status >= 500 && attempt === 0) {
+            this.logger.warn(`Onboarding AI 5xx (attempt 1), retrying: ${response.status}`);
+            await new Promise(r => setTimeout(r, 800));
+            continue;
+          }
+          this.logger.warn(`OpenAI request failed: ${response.status} ${lastDetail.slice(0, 200)}`);
+          return null;
+        }
+
+        const payload = (await response.json()) as {
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            total_tokens?: number;
+          };
+          choices?: Array<{ message?: { content?: string } }>;
         };
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const usage = payload.usage;
-      await this.aiUsageService.logGeneration({
-        userId: options.userId,
-        feature: options.feature,
-        promptKey: options.promptKey,
-        provider: 'openai',
-        model,
-        inputTokens: usage?.prompt_tokens || 0,
-        outputTokens: usage?.completion_tokens || 0,
-        totalTokens:
-          usage?.total_tokens ||
-          (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
-        metadata: {
-          prompt,
-          response: payload.choices?.[0]?.message?.content || '',
-        },
-      });
-      const content = payload.choices?.[0]?.message?.content?.trim();
-      if (!content) {
+        const usage = payload.usage;
+        await this.aiUsageService.logGeneration({
+          userId: options.userId,
+          feature: options.feature,
+          promptKey: options.promptKey,
+          provider: 'openai',
+          model,
+          inputTokens: usage?.prompt_tokens || 0,
+          outputTokens: usage?.completion_tokens || 0,
+          totalTokens:
+            usage?.total_tokens ||
+            (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+          metadata: {
+            prompt,
+            response: payload.choices?.[0]?.message?.content || '',
+          },
+        });
+        const content = payload.choices?.[0]?.message?.content?.trim();
+        if (!content) {
+          return null;
+        }
+
+        const parsed = this.safeParseJson(content);
+        // Log successful onboarding AI call so admin "访谈" category shows activity
+        await this.serverLogService.info(`onboarding.ai.success`, 'onboarding AI call succeeded', {
+          feature: options.feature,
+          tokens: usage?.total_tokens || 0,
+        });
+        return parsed as T;
+      } catch (error) {
+        if (attempt === 0) {
+          this.logger.warn(`Onboarding AI fetch error (attempt 1), retrying: ${(error as Error).message}`);
+          await new Promise(r => setTimeout(r, 800));
+          continue;
+        }
+        this.logger.warn(`OpenAI call error: ${(error as Error).message}`);
+        await this.serverLogService.warn(
+          'onboarding.openai.error',
+          'openai call failed',
+          {
+            feature: options.feature,
+            error: (error as Error).message,
+            attempts: attempt + 1,
+          },
+        );
         return null;
       }
-
-      const parsed = this.safeParseJson(content);
-      return parsed as T;
-    } catch (error) {
-      this.logger.warn(`OpenAI call error: ${(error as Error).message}`);
-      await this.serverLogService.warn(
-        'onboarding.openai.error',
-        'openai call failed',
-        {
-          feature: options.feature,
-          error: (error as Error).message,
-        },
-      );
-      return null;
     }
+
+    // Both attempts failed with 5xx
+    this.logger.warn(`Onboarding AI failed after retry: ${lastStatus}`);
+    await this.serverLogService.warn(
+      'onboarding.openai.error',
+      'openai call failed after retry',
+      {
+        feature: options.feature,
+        status: lastStatus,
+        detail: lastDetail.slice(0, 280),
+      },
+    );
+    return null;
   }
 
   private safeParseJson(raw: string) {

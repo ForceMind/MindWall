@@ -795,71 +795,93 @@ export class CompanionService {
       return null;
     }
 
-    try {
-      const response = await fetch(
-        this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
-        {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: aiConfig.openaiModel,
-          temperature: 0.85,
-          messages,
-        }),
-        },
-      );
+    const url = this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl);
+    const reqBody = JSON.stringify({
+      model: aiConfig.openaiModel,
+      temperature: 0.85,
+      messages,
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    };
 
-      if (!response.ok) {
-        const detail = await response.text();
-        this.logger.warn(`Companion reply failed: ${response.status} ${detail}`);
-        await this.serverLogService.warn('companion.openai.failed', 'openai reply failed', {
-          status: response.status,
-          detail: detail.slice(0, 280),
+    // Retry once on 5xx (XunFei intermittent engine errors)
+    let lastStatus = 0;
+    let lastDetail = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(url, { method: 'POST', headers, body: reqBody });
+
+        if (!response.ok) {
+          lastStatus = response.status;
+          lastDetail = await response.text().catch(() => '');
+          if (response.status >= 500 && attempt === 0) {
+            this.logger.warn(`Companion AI 5xx (attempt 1), retrying: ${response.status}`);
+            await new Promise(r => setTimeout(r, 800));
+            continue;
+          }
+          this.logger.warn(`Companion reply failed: ${response.status} ${lastDetail.slice(0, 200)}`);
+          await this.serverLogService.warn('companion.openai.failed', 'openai reply failed', {
+            status: response.status,
+            detail: lastDetail.slice(0, 280),
+            attempts: attempt + 1,
+          });
+          return null;
+        }
+
+        const payload = (await response.json()) as {
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            total_tokens?: number;
+          };
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const usage = payload.usage;
+        const content = payload.choices?.[0]?.message?.content?.trim();
+        await this.aiUsageService.logGeneration({
+          userId,
+          feature,
+          promptKey,
+          provider: 'openai',
+          model: aiConfig.openaiModel,
+          inputTokens: usage?.prompt_tokens || 0,
+          outputTokens: usage?.completion_tokens || 0,
+          totalTokens:
+            usage?.total_tokens ||
+            (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
+          metadata: {
+            prompt: messages,
+            response: content || null,
+          },
+        });
+
+        if (!content) {
+          return null;
+        }
+        return content.slice(0, 260);
+      } catch (error) {
+        if (attempt === 0) {
+          this.logger.warn(`Companion AI fetch error (attempt 1), retrying: ${(error as Error).message}`);
+          await new Promise(r => setTimeout(r, 800));
+          continue;
+        }
+        this.logger.warn(`Companion reply error: ${(error as Error).message}`);
+        await this.serverLogService.warn('companion.openai.error', 'openai reply error', {
+          error: (error as Error).message,
         });
         return null;
       }
-
-      const payload = (await response.json()) as {
-        usage?: {
-          prompt_tokens?: number;
-          completion_tokens?: number;
-          total_tokens?: number;
-        };
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const usage = payload.usage;
-      const content = payload.choices?.[0]?.message?.content?.trim();
-      await this.aiUsageService.logGeneration({
-        userId,
-        feature,
-        promptKey,
-        provider: 'openai',
-        model: aiConfig.openaiModel,
-        inputTokens: usage?.prompt_tokens || 0,
-        outputTokens: usage?.completion_tokens || 0,
-        totalTokens:
-          usage?.total_tokens ||
-          (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0),
-        metadata: {
-          prompt: messages,
-          response: content || null,
-        },
-      });
-
-      if (!content) {
-        return null;
-      }
-      return content.slice(0, 260);
-    } catch (error) {
-      this.logger.warn(`Companion reply error: ${(error as Error).message}`);
-      await this.serverLogService.warn('companion.openai.error', 'openai reply error', {
-        error: (error as Error).message,
-      });
-      return null;
     }
+
+    // Both attempts failed with 5xx
+    this.logger.warn(`Companion reply failed after retry: ${lastStatus}`);
+    await this.serverLogService.warn('companion.openai.failed', 'openai reply failed after retry', {
+      status: lastStatus,
+      detail: lastDetail.slice(0, 280),
+    });
+    return null;
   }
 
   private async generateRelayTexts(
@@ -920,32 +942,43 @@ export class CompanionService {
           { role: 'system', content: systemContent },
           { role: 'user', content: `转述这条消息：\n"${text.slice(0, 200)}"` },
         ];
-        let resp: Response;
-        try {
-          resp = await fetch(
-            this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl),
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify({
-                model: aiConfig.openaiModel,
-                temperature: 0.3,
-                messages: relayMessages,
-              }),
-            },
-          );
-        } catch (fetchErr) {
-          this.logger.warn(`Relay fetch error [${label}]: ${(fetchErr as Error).message}`);
-          return null;
+        const relayUrl = this.adminConfigService.getChatCompletionsUrl(aiConfig.openaiBaseUrl);
+        const relayHeaders = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        };
+        const relayBody = JSON.stringify({
+          model: aiConfig.openaiModel,
+          temperature: 0.3,
+          messages: relayMessages,
+        });
+
+        let resp: Response | null = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            resp = await fetch(relayUrl, { method: 'POST', headers: relayHeaders, body: relayBody });
+          } catch (fetchErr) {
+            if (attempt === 0) {
+              this.logger.warn(`Relay fetch error [${label}] (attempt 1), retrying: ${(fetchErr as Error).message}`);
+              await new Promise(r => setTimeout(r, 800));
+              continue;
+            }
+            this.logger.warn(`Relay fetch error [${label}]: ${(fetchErr as Error).message}`);
+            return null;
+          }
+          if (!resp.ok) {
+            const detail = await resp.text().catch(() => '');
+            if (resp.status >= 500 && attempt === 0) {
+              this.logger.warn(`Relay 5xx [${label}] (attempt 1), retrying: ${resp.status}`);
+              await new Promise(r => setTimeout(r, 800));
+              continue;
+            }
+            this.logger.warn(`Relay API failed [${label}]: ${resp.status} ${detail.slice(0, 200)}`);
+            return null;
+          }
+          break;
         }
-        if (!resp.ok) {
-          const detail = await resp.text().catch(() => '');
-          this.logger.warn(`Relay API failed [${label}]: ${resp.status} ${detail.slice(0, 200)}`);
-          return null;
-        }
+        if (!resp || !resp.ok) return null;
         const payload = (await resp.json()) as any;
         const content = payload.choices?.[0]?.message?.content?.trim();
         // Always log relay usage — even if content is empty (for debugging)
