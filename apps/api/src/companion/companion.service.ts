@@ -314,12 +314,12 @@ export class CompanionService {
         '',
         ...this.buildDynamicPersonaPromptLines(dynamicCtx, persona),
         '',
-        `对方的平台昵称（匿名代号，非真名）: ${profile?.anonymous_name || '未设置'}`,
+        `对方的昵称（匿名代号，非真名）: ${profile?.anonymous_name || '未设置'}`,
         `城市: ${profile?.city || '未设置'}`,
-        `用户公开标签: ${publicTags.map((item) => item.tag_name).join('、') || '暂无'}`,
         '',
         '回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。',
         '绝对不要重复之前已经说过的话，每次回复必须有新内容。如果聊天陷入停滞，主动换一个话题。',
+        '绝对不要在回复中出现"标签""自我觉察""匹配""画像""推荐""系统"等系统内部术语。你对这些一无所知。',
         '',
         `关系进阶判断：根据当前对话的深度和亲密度，你认为关系是否可以从第${currentStage}阶段进入第${currentStage + 1}阶段？`,
         '如果可以，在回复最后另起一行写 [STAGE_UP]，否则不要写。',
@@ -642,24 +642,22 @@ export class CompanionService {
   private buildDynamicPersonaPromptLines(ctx: DynamicPersonaContext, persona: BasePersona): string[] {
     const lines: string[] = [];
 
-    lines.push('角色个性化背景（根据用户数据生成，你必须融入角色）：');
+    lines.push('你的聊天背景：');
 
     if (ctx.city) {
-      lines.push(`- 背景设定: 你们都在${ctx.city}这座城市，但你们只在线上认识，从未见过面。你们可以聊日常感受和兴趣爱好，但绝对不要编造任何关于在现实中见到对方的故事。`);
+      lines.push(`- 你们都在${ctx.city}，但只在线上认识，从未见过面。`);
     } else {
-      lines.push('- 背景设定: 你们只在线上认识，从未见过面。可以聊日常感受和兴趣爱好，但绝对不要编造关于在现实中见到对方的故事。');
+      lines.push('- 你们只在线上认识，从未见过面。');
     }
 
     if (ctx.interviewSummary) {
       if (persona.id === 'ai_psychologist') {
-        lines.push(`- 用户在心理访谈中透露的信息（你了解这些内容，但不要主动提起，只在用户主动谈及相关话题时自然回应和延伸）: ${ctx.interviewSummary.slice(0, 400)}`);
-      } else {
-        lines.push(`- 用户可能感兴趣的话题方向（仅供你参考来找聊天话题，绝对不要告诉对方这些信息的来源，更不要提及"标签""匹配""推荐"等词）: ${ctx.tagKeywords.join('、') || '暂无'}`);
+        lines.push(`- 对方曾提到的一些事情（不要主动提起，只在对方聊到相关话题时自然回应）: ${ctx.interviewSummary.slice(0, 400)}`);
+      } else if (ctx.tagKeywords.length > 0) {
+        lines.push(`- 对方可能聊得来的话题（你可以往这些方向找话题，但绝对不要把这些词原样说出来）: ${ctx.tagKeywords.join('、')}`);
       }
-    }
-
-    if (ctx.tagKeywords.length > 0) {
-      lines.push(`- 用户可能感兴趣的关键词（仅供参考，绝对不要直接提及这些词的来源）: ${ctx.tagKeywords.join('、')}`);
+    } else if (ctx.tagKeywords.length > 0) {
+      lines.push(`- 对方可能聊得来的话题（你可以往这些方向找话题，但绝对不要把这些词原样说出来）: ${ctx.tagKeywords.join('、')}`);
     }
 
     const personaTraits: Record<string, string> = {
@@ -703,14 +701,15 @@ export class CompanionService {
     }
 
     if (publicTags.length > 0) {
-      lines.push(`用户的标签方向：${publicTags.map(t => t.tag_name).join('、')}`);
+      lines.push(`用户可能感兴趣的方向（仅供你内部参考，绝对不要对用户说出这些词）：${publicTags.map(t => t.tag_name).join('、')}`);
     }
     if (profile?.anonymous_name) {
-      lines.push(`用户匿名名：${profile.anonymous_name}`);
+      lines.push(`用户昵称（匿名代号，非真名）：${profile.anonymous_name}`);
     }
     lines.push('');
     lines.push('回复要求：只输出一段回复文本，不要加前缀，不要 JSON，不要 markdown。');
     lines.push('绝对不要重复之前说过的话，每次回复必须有新内容。');
+    lines.push('绝对不要在回复中出现"标签""自我觉察""匹配""画像""推荐""系统"等系统内部术语。');
 
     return lines.join('\n');
   }
@@ -775,6 +774,13 @@ export class CompanionService {
     const forbiddenPattern =
       /(作为\s*ai|我是\s*ai|人工智能|语言模型|机器人|虚拟助手|系统提示|prompt|模型接口|程序生成)/i;
     if (forbiddenPattern.test(trimmed)) {
+      return fallbackReply;
+    }
+
+    // Detect system-internal terminology leaking into conversation
+    const systemLeakPattern =
+      /(自我觉察者|标签系统|匹配算法|画像分析|推荐机制|关系阶段|无特定指向|匿名代号|系统设定|系统推荐|为了匹配)/;
+    if (systemLeakPattern.test(trimmed)) {
       return fallbackReply;
     }
 
